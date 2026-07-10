@@ -2,14 +2,13 @@ import { create } from "zustand";
 import { supabase } from "./lib/supabase";
 
 // ── Helpers ──
-const local = (k, v) => { try { v != null ? localStorage.setItem(k, JSON.stringify(v)) : localStorage.getItem(k); } catch {} return v == null ? JSON.parse(localStorage.getItem(k) || "null") : v; };
+const local = (k, v) => { try { v != null ? localStorage.setItem(k, JSON.stringify(v)) : null; } catch {} return v == null ? JSON.parse(localStorage.getItem(k) || "null") : v; };
 
 export function getRecurringDates(event, months = 3) {
   if (!event.repeat) return [];
   const dates = [];
   const start = new Date(event.date);
-  const end = new Date();
-  end.setMonth(end.getMonth() + months);
+  const end = new Date(); end.setMonth(end.getMonth() + months);
   let d = new Date(start);
   while (d <= end) {
     if (d > start) dates.push(d.toISOString().slice(0, 10));
@@ -20,10 +19,20 @@ export function getRecurringDates(event, months = 3) {
   return dates;
 }
 
-// ── Supabase Realtime Subscriptions ──
+// ── Anonymous Auth ──
+async function ensureAuth() {
+  if (!supabase) return null;
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) return session.user;
+  const { data, error } = await supabase.auth.signInAnonymously();
+  if (error) { console.error("anon auth failed:", error); return null; }
+  return data.user;
+}
+
+// ── Supabase Realtime ──
 let channels = [];
 
-export function subAll(pairId) {
+export async function subAll(pairId) {
   cleanup();
   if (!supabase || !pairId) return;
   channels = [
@@ -35,34 +44,36 @@ export function subAll(pairId) {
 
 function cleanup() { channels.forEach((c) => supabase?.removeChannel(c)); channels = []; }
 
-// ── Fetch helpers ──
 async function fetchEvents(pairId) {
   if (!supabase) return;
   const { data } = await supabase.from("events").select("*").eq("pair_id", pairId).order("date", { ascending: true });
   if (data) useEvents.setState({ events: data });
 }
-
 async function fetchNotes(pairId) {
   if (!supabase) return;
   const { data } = await supabase.from("notes").select("*").eq("pair_id", pairId).order("created_at", { ascending: false });
   if (data) useNotes.setState({ notes: data });
 }
-
 async function fetchPings(pairId) {
   if (!supabase) return;
   const { data } = await supabase.from("pings").select("*").eq("pair_id", pairId).order("created_at", { ascending: false }).limit(30);
   if (data) useMissYou.setState({ pings: data });
 }
 
-// ── Auth ──
+// ── Auth Store ──
 export const useAuth = create((set) => ({
   user: local("cosmic_user"), partner: null, loading: !local("cosmic_user"),
   setUser: (u) => { local("cosmic_user", u); set({ user: u, loading: false }); },
   setPartner: (p) => set({ partner: p }),
-  logout: () => { localStorage.removeItem("cosmic_user"); set({ user: null, partner: null }); cleanup(); },
+  logout: async () => {
+    if (supabase) await supabase.auth.signOut();
+    localStorage.removeItem("cosmic_user");
+    set({ user: null, partner: null });
+    cleanup();
+  },
 }));
 
-// ── Events ──
+// ── Events Store ──
 export const useEvents = create((set) => ({
   events: [],
   setEvents: (e) => set({ events: e }),
@@ -84,21 +95,14 @@ export const useEvents = create((set) => ({
   },
 }));
 
-// ── Mood ──
+// ── Mood Store ──
 export const useMood = create((set) => ({
   myMood: local("cosmic_mood"), partnerMood: null,
-  setMyMood: async (m) => {
-    local("cosmic_mood", m);
-    set({ myMood: m });
-    if (supabase) {
-      const user = useAuth.getState().user;
-      if (user?.id) await supabase.from("users").update({ mood: m }).eq("id", user.id);
-    }
-  },
+  setMyMood: async (m) => { local("cosmic_mood", m); set({ myMood: m }); },
   setPartnerMood: (m) => set({ partnerMood: m }),
 }));
 
-// ── Miss You ──
+// ── Miss You Store ──
 export const useMissYou = create((set) => ({
   pings: [],
   sendPing: async (p) => {
@@ -108,66 +112,65 @@ export const useMissYou = create((set) => ({
   clearPings: () => set({ pings: [] }),
 }));
 
-// ── Notes ──
+// ── Notes Store ──
 export const useNotes = create((set) => ({
   notes: [],
   addNote: async (n) => {
-    if (supabase) {
-      const { data } = await supabase.from("notes").insert(n).select().single();
-      if (data) set((s) => ({ notes: [data, ...s.notes] }));
-    } else {
-      set((s) => ({ notes: [{ ...n, id: crypto.randomUUID() }, ...s.notes] }));
-    }
+    if (supabase) { const { data } = await supabase.from("notes").insert(n).select().single(); if (data) set((s) => ({ notes: [data, ...s.notes] })); }
+    else set((s) => ({ notes: [{ ...n, id: crypto.randomUUID() }, ...s.notes] }));
   },
   setNotes: (n) => set({ notes: n }),
 }));
 
-// ── Pairing — now uses Supabase ──
+// ── Pairing (with Anonymous Auth + proper RLS) ──
 
 export async function createPair(name) {
   if (!supabase) return fallbackCreatePair(name);
-  // 1. Create pair
-  const { data: pair, error: e1 } = await supabase.from("pairs").insert({ code: crypto.randomUUID().slice(0, 8) }).select().single();
-  if (e1) { console.error("createPair pairs error:", e1); return null; }
-  if (!pair) { console.error("createPair: no pair returned"); return null; }
-  // 2. Create user
-  const { data: user, error: e2 } = await supabase.from("users").insert({ name, pair_id: pair.id }).select().single();
-  if (e2) { console.error("createPair users error:", e2); return null; }
-  if (!user) { console.error("createPair: no user returned"); return null; }
-  // 3. Subscribe & save
+
+  const uid = await ensureAuth();
+  if (!uid) return null;
+
+  const code = crypto.randomUUID().slice(0, 8);
+  const { data: pair, error: e1 } = await supabase.from("pairs").insert({ code }).select().single();
+  if (e1) { console.error(e1); return null; }
+
+  const { error: e2 } = await supabase.from("users").insert({ id: uid.id, name, pair_id: pair.id }).select().single();
+  if (e2) { console.error(e2); return null; }
+
+  // Re-fetch with session to get fresh RLS context
   subAll(pair.id);
   fetchEvents(pair.id);
-  useAuth.getState().setUser({ ...user, pairCode: pair.code, pairId: pair.id });
-  return pair.code;
+  useAuth.getState().setUser({ id: uid.id, name, pairCode: code, pairId: pair.id });
+  return code;
 }
 
 export async function joinPair(name, code) {
   if (!supabase) return fallbackJoinPair(name, code);
-  // 1. Find pair
+
+  const uid = await ensureAuth();
+  if (!uid) return { error: "認證失敗" };
+
   const { data: pair, error: e1 } = await supabase.from("pairs").select().eq("code", code).single();
-  if (e1) { console.error("joinPair pairs error:", e1); return { error: e1.message }; }
-  if (!pair) return { error: "找不到這個邀請碼" };
-  // 2. Create user in this pair
-  const { data: user } = await supabase.from("users").insert({ name, pair_id: pair.id }).select().single();
-  if (!user) return { error: "加入失敗" };
-  // 3. Subscribe & save
+  if (e1 || !pair) return { error: "找不到這個邀請碼" };
+
+  const { error: e2 } = await supabase.from("users").insert({ id: uid.id, name, pair_id: pair.id }).select().single();
+  if (e2) { console.error(e2); return { error: "加入失敗" }; }
+
   subAll(pair.id);
   fetchEvents(pair.id);
-  useAuth.getState().setUser({ ...user, pairCode: code, pairId: pair.id });
+  useAuth.getState().setUser({ id: uid.id, name, pairCode: code, pairId: pair.id });
   return { success: true };
 }
 
-// Fallback: no Supabase configured, use localStorage only
 function fallbackCreatePair(name) {
   const pairCode = crypto.randomUUID().slice(0, 8);
-  const user = { id: crypto.randomUUID(), name, pairCode, paired: false };
+  const user = { id: crypto.randomUUID(), name, pairCode, pairId: null };
   local("cosmic_user", user);
   useAuth.getState().setUser(user);
   return pairCode;
 }
-
 function fallbackJoinPair(name, code) {
-  const user = { id: crypto.randomUUID(), name, pairCode: code, paired: true };
+  const user = { id: crypto.randomUUID(), name, pairCode: code, pairId: null };
   local("cosmic_user", user);
   useAuth.getState().setUser(user);
   return { success: true };
