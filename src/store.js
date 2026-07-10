@@ -4,22 +4,27 @@ import { supabase } from "./lib/supabase";
 // ── Helpers ──
 const local = (k, v) => { try { v != null ? localStorage.setItem(k, JSON.stringify(v)) : null; } catch {} return v == null ? JSON.parse(localStorage.getItem(k) || "null") : v; };
 
-export function getRecurringDates(event, months = 3) {
+// 一律用本地時區組日期字串——toISOString() 是 UTC，
+// 在台灣（UTC+8）凌晨前建立的 Date 會被算成前一天
+export const fmtDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+export function getRecurringDates(event, months = 13) {
   if (!event.repeat) return [];
   const dates = [];
-  const start = new Date(event.date);
+  const start = new Date(event.date + "T00:00:00");
   const end = new Date(); end.setMonth(end.getMonth() + months);
   let d = new Date(start);
   while (d <= end) {
-    if (d > start) dates.push(d.toISOString().slice(0, 10));
+    if (d > start) dates.push(fmtDate(d));
     if (event.repeat === "weekly") d.setDate(d.getDate() + 7);
     else if (event.repeat === "monthly") d.setMonth(d.getMonth() + 1);
+    else if (event.repeat === "yearly") d.setFullYear(d.getFullYear() + 1);
     else break;
   }
   return dates;
 }
 
-// ── Anonymous Auth ──
+// ── Anonymous Auth（僅剩無 Supabase 的本地 fallback 在用）──
 async function ensureAuth() {
   if (!supabase) return null;
   const { data: { session } } = await supabase.auth.getSession();
@@ -29,16 +34,83 @@ async function ensureAuth() {
   return data.user;
 }
 
+// ── Google Auth ──
+export async function signInWithGoogle() {
+  if (!supabase) return;
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: window.location.origin },
+  });
+  if (error) console.error("google sign-in failed:", error);
+}
+
+// App 啟動與 OAuth 轉址回來時呼叫：
+// 1. 有 users 資料列 → 直接載入身分
+// 2. 第一次 Google 登入 → 自動建立配對，或加入對方已建立的配對（不需要邀請碼——
+//    Google 測試名單只有你們兩個人，第三者根本登入不進來）
+let authBusy = false;
+export async function initAuth() {
+  if (!supabase) {
+    useAuth.setState({ user: local("cosmic_user"), loading: false });
+    return;
+  }
+  if (authBusy) return;
+  authBusy = true;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const au = session?.user;
+    if (!au || au.is_anonymous) { useAuth.setState({ user: null, loading: false }); return; }
+
+    const { data: row } = await supabase.from("users").select("*").eq("id", au.id).maybeSingle();
+    if (row) {
+      useAuth.getState().setUser({ id: row.id, name: row.name, pairId: row.pair_id });
+      fetchPairInfo(row.pair_id);
+      return;
+    }
+
+    // 第一次登入 → 自動配對
+    const name = au.user_metadata?.full_name || au.user_metadata?.name || au.email?.split("@")[0] || "我";
+    const { data: pairs } = await supabase.from("pairs").select("id, paired_at, users(id, email)");
+    // 只認有 email 的成員（Google 帳號）；舊的匿名測試配對不算數
+    const open = (pairs || []).find((p) => {
+      const g = (p.users || []).filter((u) => u.email);
+      return g.length === 1 && g[0].id !== au.id;
+    });
+    let pairId = open?.id;
+    if (!pairId) {
+      const { data: pair, error } = await supabase.from("pairs").insert({ code: crypto.randomUUID().slice(0, 8) }).select().single();
+      if (error) { console.error("create pair failed:", error); useAuth.setState({ user: null, loading: false, authError: error.message }); return; }
+      pairId = pair.id;
+    }
+    const { error: e2 } = await supabase.from("users").insert({ id: au.id, name, pair_id: pairId, email: au.email });
+    if (e2) {
+      console.error("provision user failed (還沒跑 supabase_v5_google.sql？):", e2);
+      useAuth.setState({ user: null, loading: false, authError: e2.message });
+      return;
+    }
+    useAuth.getState().setUser({ id: au.id, name, pairId });
+    fetchPairInfo(pairId);
+  } finally {
+    authBusy = false;
+  }
+}
+
 // ── Supabase Realtime ──
 let channels = [];
 
 export async function subAll(pairId) {
   cleanup();
   if (!supabase || !pairId) return;
+  // 訂閱之前要先把既有資料抓回來——不然重新整理後畫面是空的，
+  // 要等到有人改資料觸發 realtime 才會出現
+  fetchEvents(pairId);
+  fetchNotes(pairId);
+  fetchLists(pairId);
   channels = [
     supabase.channel("events").on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `pair_id=eq.${pairId}` }, () => fetchEvents(pairId)).subscribe(),
     supabase.channel("notes").on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: `pair_id=eq.${pairId}` }, () => fetchNotes(pairId)).subscribe(),
     supabase.channel("pings").on("postgres_changes", { event: "INSERT", schema: "public", table: "pings", filter: `pair_id=eq.${pairId}` }, () => fetchPings(pairId)).subscribe(),
+    supabase.channel("list_items").on("postgres_changes", { event: "*", schema: "public", table: "list_items", filter: `pair_id=eq.${pairId}` }, () => fetchLists(pairId)).subscribe(),
   ];
 }
 
@@ -59,11 +131,19 @@ async function fetchPings(pairId) {
   const { data } = await supabase.from("pings").select("*").eq("pair_id", pairId).order("created_at", { ascending: false }).limit(30);
   if (data) useMissYou.setState({ pings: data });
 }
+async function fetchLists(pairId) {
+  if (!supabase) return;
+  const { data, error } = await supabase.from("list_items").select("*").eq("pair_id", pairId).order("created_at", { ascending: false });
+  if (error) { console.error("fetchLists failed (還沒跑 supabase_v4_features.sql？):", error); return; }
+  if (data) useLists.setState({ items: data });
+}
 
 // ── Auth Store ──
+// 有 Supabase 時身分一律由 initAuth() 從 session 推導，不吃 localStorage 快取——
+// 不然舊的匿名身分會殘留，造成看得到畫面但存不進資料的詭異狀態
 export const useAuth = create((set) => ({
-  user: local("cosmic_user"), partner: null, loading: !local("cosmic_user"),
-  setUser: (u) => { local("cosmic_user", u); set({ user: u, loading: false }); },
+  user: supabase ? null : local("cosmic_user"), partner: null, loading: true, authError: "",
+  setUser: (u) => { local("cosmic_user", u); set({ user: u, loading: false, authError: "" }); },
   setPartner: (p) => set({ partner: p }),
   logout: async () => {
     if (supabase) await supabase.auth.signOut();
@@ -79,11 +159,13 @@ export const useEvents = create((set) => ({
   setEvents: (e) => set({ events: e }),
   addEvent: async (e) => {
     if (supabase) {
-      const { data } = await supabase.from("events").insert(e).select().single();
+      const { data, error } = await supabase.from("events").insert(e).select().single();
+      if (error) { console.error("addEvent failed:", error); return { error: error.message }; }
       if (data) set((s) => ({ events: [data, ...s.events] }));
     } else {
       set((s) => ({ events: [{ ...e, id: crypto.randomUUID() }, ...s.events] }));
     }
+    return {};
   },
   removeEvent: async (id) => {
     if (supabase) await supabase.from("events").delete().eq("id", id);
@@ -106,10 +188,37 @@ export const useMood = create((set) => ({
 export const useMissYou = create((set) => ({
   pings: [],
   sendPing: async (p) => {
-    if (supabase) await supabase.from("pings").insert(p);
+    // p 只能帶資料表真的有的欄位（pair_id / from_user），多餘欄位整筆會被拒
+    if (supabase) {
+      const { error } = await supabase.from("pings").insert(p);
+      if (error) console.error("sendPing failed:", error);
+    }
     set((s) => ({ pings: [{ ...p, id: crypto.randomUUID() }, ...s.pings] }));
   },
   clearPings: () => set({ pings: [] }),
+}));
+
+// ── Shared Lists Store（共同清單：想吃/想去/想看）──
+export const useLists = create((set) => ({
+  items: [],
+  addItem: async (it) => {
+    if (supabase) {
+      const { data, error } = await supabase.from("list_items").insert(it).select().single();
+      if (error) { console.error("addItem failed:", error); return { error: error.message }; }
+      if (data) set((s) => ({ items: [data, ...s.items] }));
+    } else {
+      set((s) => ({ items: [{ ...it, id: crypto.randomUUID(), done: false }, ...s.items] }));
+    }
+    return {};
+  },
+  toggleItem: async (id, done) => {
+    if (supabase) await supabase.from("list_items").update({ done, done_at: done ? new Date().toISOString() : null }).eq("id", id);
+    set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, done } : i)) }));
+  },
+  removeItem: async (id) => {
+    if (supabase) await supabase.from("list_items").delete().eq("id", id);
+    set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+  },
 }));
 
 // ── Notes Store ──

@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useAuth, useEvents, useMood, useMissYou, getRecurringDates, fetchPairInfo, updatePairedAt } from "../store";
+import { useAuth, useEvents, useMood, useMissYou, useLists, getRecurringDates, fetchPairInfo, updatePairedAt, fmtDate } from "../store";
 import FloatingPhotos from "../components/FloatingPhotos";
 import CosmosView from "../components/cosmos/CosmosView";
 
@@ -11,6 +11,12 @@ const C = {
 const LABEL = { you: "你", me: "他", us: "我們" };
 const MOODS = { sunny: "☀️", cloudy: "☁️", rainy: "🌧️", stormy: "⛈️" };
 const REACTIONS = ["❤️", "😂", "🥺", "🎉", "💪"];
+const LIST_CATS = [
+  { k: "eat", label: "🍜 想吃" },
+  { k: "go", label: "📍 想去" },
+  { k: "watch", label: "🎬 想看" },
+  { k: "other", label: "✨ 其他" },
+];
 
 function getMonthDays(year, month) {
   const first = new Date(year, month, 1);
@@ -25,10 +31,14 @@ function getMonthDays(year, month) {
 function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
 export default function Dashboard() {
-  const { user, partner, setUser } = useAuth();
+  const { user, partner, logout } = useAuth();
   const { events, addEvent, removeEvent, reactEvent } = useEvents();
   const { myMood, setMyMood, partnerMood } = useMood();
   const { pings, sendPing, clearPings } = useMissYou();
+  const { items, addItem, toggleItem, removeItem } = useLists();
+  const [bucketCat, setBucketCat] = useState("eat");
+  const [bucketText, setBucketText] = useState("");
+  const [bucketError, setBucketError] = useState("");
 
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -36,7 +46,7 @@ export default function Dashboard() {
   const [view, setView] = useState("month");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [form, setForm] = useState({ title: "", type: "us", repeat: null, notes: "" });
+  const [form, setForm] = useState({ title: "", type: "us", repeat: null, notes: "", time: "" });
   const [showMood, setShowMood] = useState(false);
   const [showPairedEdit, setShowPairedEdit] = useState(false);
   const [pairedDate, setPairedDate] = useState(user?.pairedAt || "");
@@ -70,7 +80,7 @@ export default function Dashboard() {
   const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   const weekDays = ["日","一","二","三","四","五","六"];
   const days = useMemo(() => getMonthDays(year, month), [year, month]);
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = fmtDate(today);
 
   // Merge recurring events
   const allEvents = useMemo(() => {
@@ -83,23 +93,59 @@ export default function Dashboard() {
       add(ev.date);
       if (ev.repeat) getRecurringDates(ev).forEach((d) => add(d));
     });
+    // 同一天的事件依時間排序，沒填時間的排最後
+    Object.values(map).forEach((evs) => evs.sort((a, b) => (a.time || "99") < (b.time || "99") ? -1 : 1));
     return map;
   }, [events]);
+
+  // 下一個倒數目標：最近的未來事件 vs 下一個週年，取比較近的那個
+  const nextUp = useMemo(() => {
+    let best = null;
+    const future = Object.keys(allEvents).filter((d) => d > todayStr).sort();
+    if (future.length) best = { date: future[0], title: allEvents[future[0]][0].title };
+    if (user?.pairedAt) {
+      const p = new Date(user.pairedAt + "T00:00:00");
+      const anniv = new Date(today.getFullYear(), p.getMonth(), p.getDate());
+      if (fmtDate(anniv) <= todayStr) anniv.setFullYear(anniv.getFullYear() + 1);
+      const ds = fmtDate(anniv);
+      if (!best || ds < best.date) best = { date: ds, title: `在一起 ${anniv.getFullYear() - p.getFullYear()} 週年` };
+    }
+    if (!best) return null;
+    const days = Math.round((new Date(best.date + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000);
+    return { ...best, days };
+  }, [allEvents, user?.pairedAt, todayStr]);
 
   // "This day last year"
   const oneYearAgo = useMemo(() => {
     const d = new Date(today); d.setFullYear(d.getFullYear() - 1);
-    return { date: d.toISOString().slice(0, 10), events: allEvents[d.toISOString().slice(0, 10)] || [] };
+    const ds = fmtDate(d);
+    return { date: ds, events: allEvents[ds] || [] };
   }, [allEvents]);
 
   const prevMonth = () => { if (month === 0) { setYear(y => y-1); setMonth(11); } else setMonth(m => m-1); };
   const nextMonth = () => { if (month === 11) { setYear(y => y+1); setMonth(0); } else setMonth(m => m+1); };
 
-  const handleAdd = () => {
+  const [addError, setAddError] = useState("");
+
+  const handleAdd = async () => {
     if (!form.title || !selectedDate) return;
-    addEvent({ id: crypto.randomUUID(), title: form.title, date: selectedDate, type: form.type, repeat: form.repeat, notes: form.notes, emoji: null, createdAt: new Date().toISOString() });
-    setForm({ title: "", type: "us", repeat: null, notes: "" });
+    // 只送資料表存在的欄位；pair_id 一定要帶，不然 RLS 會整筆擋掉
+    const { error } = await addEvent({
+      title: form.title, date: selectedDate, type: form.type,
+      repeat: form.repeat, notes: form.notes || null, time: form.time || null,
+      pair_id: user?.pairId, created_by: user?.id,
+    });
+    if (error) { setAddError(`新增失敗：${error}`); return; }
+    setAddError("");
+    setForm({ title: "", type: "us", repeat: null, notes: "", time: "" });
     setShowAdd(false); setSelectedDate(null);
+  };
+
+  const handleAddItem = async () => {
+    if (!bucketText.trim()) return;
+    const { error } = await addItem({ text: bucketText.trim(), category: bucketCat, pair_id: user?.pairId, created_by: user?.id });
+    if (error) { setBucketError(`新增失敗：${error}`); return; }
+    setBucketError(""); setBucketText("");
   };
 
   return (
@@ -145,15 +191,21 @@ export default function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => sendPing({ id: crypto.randomUUID(), from: user?.name, at: new Date().toISOString() })}
+          <button onClick={() => sendPing({ pair_id: user?.pairId, from_user: user?.id })}
             className="text-sm hover:scale-110 transition-transform" title="想你">💫</button>
-          <button onClick={() => { localStorage.removeItem("cosmic_user"); setUser(null); }}
-            className="text-star-dim hover:text-star text-xs">登出</button>
+          <button onClick={logout} className="text-star-dim hover:text-star text-xs">登出</button>
         </div>
       </header>
 
-      {/* Invite code banner — shown until partner joins */}
-      {user?.pairCode && user?.pairCode !== partner?.pairCode && (
+      {/* 等待配對 banner — 對方登入（抓得到 partner）後就收起來 */}
+      {!partner && user?.pairId && (
+        <div className="glass mx-3 mt-2 p-3 text-center border border-glow-purple/30">
+          <p className="text-sm text-star">✦ 等待另一顆星</p>
+          <p className="text-[11px] text-star-dim mt-1">請另一半打開這個網站、用他的 Google 帳號登入，就會自動配對</p>
+        </div>
+      )}
+      {/* 舊版邀請碼流程（本地模式備援） */}
+      {user?.pairCode && !user?.pairId && !partner && (
         <div className="glass mx-3 mt-2 p-3 text-center border border-glow-purple/30">
           <p className="text-xs text-star-dim">你的邀請碼</p>
           <p className="text-lg font-mono font-bold tracking-[0.2em] text-glow-purple select-all mt-1">{user.pairCode}</p>
@@ -170,6 +222,17 @@ export default function Dashboard() {
               {emoji}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* Countdown banner：最近的未來事件或週年 */}
+      {nextUp && (
+        <div className="glass mx-3 mt-2 px-4 py-2.5 flex items-center gap-2.5">
+          <span className="text-base">⏳</span>
+          <p className="text-sm text-star flex-1 truncate">{nextUp.title}</p>
+          <p className="text-xs text-star-dim shrink-0">
+            {nextUp.days === 1 ? "就是明天！" : <>還有 <span className="text-glow-purple font-bold text-sm">{nextUp.days}</span> 天</>}
+          </p>
         </div>
       )}
 
@@ -205,10 +268,10 @@ export default function Dashboard() {
         <>
           {/* View toggle */}
           <div className="flex mx-3 mt-2 bg-white/5 rounded-lg p-0.5">
-            {["month", "list", "cosmos"].map((v) => (
+            {["month", "list", "bucket", "cosmos"].map((v) => (
               <button key={v} onClick={() => setView(v)}
                 className={`flex-1 py-1.5 text-xs rounded-md transition-all ${view === v ? "bg-white/10 text-star" : "text-star-dim"}`}>
-                {v === "month" ? "月曆" : v === "list" ? "列表" : "星空"}
+                {v === "month" ? "月曆" : v === "list" ? "列表" : v === "bucket" ? "清單" : "星空"}
               </button>
             ))}
           </div>
@@ -236,17 +299,24 @@ export default function Dashboard() {
                 <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
                   {days.map((date, i) => {
                     if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
-                    const ds = date.toISOString().slice(0, 10);
+                    const ds = fmtDate(date);
                     const isToday = ds === todayStr;
                     const dayEvents = allEvents[ds] || [];
                     return (
                       <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
                         <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
-                        <div className="flex flex-wrap gap-0.5 mt-0.5">
-                          {dayEvents.slice(0, 3).map((ev) => (
-                            <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
+                        {/* 手機上格子太小只放色點；sm 以上直接顯示事件標題 */}
+                        <div className="flex flex-wrap gap-0.5 mt-0.5 sm:hidden">
+                          {dayEvents.slice(0, 3).map((ev, j) => (
+                            <span key={`${ev.id}-${j}`} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
                           ))}
+                        </div>
+                        <div className="hidden sm:block mt-0.5 space-y-0.5">
+                          {dayEvents.slice(0, 2).map((ev, j) => (
+                            <div key={`${ev.id}-${j}`} className={`text-[9px] leading-tight truncate rounded px-1 ${C[ev.type]?.bg} ${C[ev.type]?.text}`}>{ev.title}</div>
+                          ))}
+                          {dayEvents.length > 2 && <div className="text-[8px] text-star-dim/60 px-1">+{dayEvents.length - 2}</div>}
                         </div>
                       </div>
                     );
@@ -265,8 +335,11 @@ export default function Dashboard() {
                   {evs.map((ev) => (
                     <div key={ev.id} className="flex items-center gap-2 py-1.5 border-t border-white/5 group">
                       <span className={`w-2 h-2 rounded-full ${C[ev.type]?.dot}`} />
-                      <span className="text-star text-sm flex-1">{ev.title}</span>
-                      {ev.repeat && <span className="text-[9px] text-star-dim/50 mr-1">↻{ev.repeat === "weekly" ? "週" : "月"}</span>}
+                      <span className="text-star text-sm flex-1">
+                        {ev.time && <span className="text-star-dim text-xs mr-1.5">{ev.time.slice(0, 5)}</span>}
+                        {ev.title}
+                      </span>
+                      {ev.repeat && <span className="text-[9px] text-star-dim/50 mr-1">↻{ev.repeat === "weekly" ? "週" : ev.repeat === "monthly" ? "月" : "年"}</span>}
                       {ev.emoji && <span className="text-xs">{ev.emoji}</span>}
                       <div className="hidden group-hover:flex items-center gap-0.5">
                         {REACTIONS.map((e) => (
@@ -285,29 +358,111 @@ export default function Dashboard() {
             </div>
           )}
 
-      {/* Add event modal */}
+          {/* 共同清單：想吃/想去/想看，兩個人即時同步 */}
+          {view === "bucket" && (
+            <div className="mx-3 mt-4 space-y-3">
+              <div className="flex gap-1.5">
+                {LIST_CATS.map(({ k, label }) => (
+                  <button key={k} onClick={() => setBucketCat(k)}
+                    className={`flex-1 py-2 rounded-lg text-xs border transition-colors ${bucketCat === k ? "border-glow-purple bg-us/15 text-star" : "border-white/10 text-star-dim"}`}>
+                    {label}
+                    <span className="ml-1 opacity-60">{items.filter((i) => i.category === k && !i.done).length || ""}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <input value={bucketText} onChange={(e) => setBucketText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleAddItem(); }}
+                  placeholder={`新增${LIST_CATS.find((c) => c.k === bucketCat)?.label.slice(2)}的…`}
+                  className="flex-1 px-3 py-2.5 bg-white/5 rounded-lg text-star text-sm placeholder-star-dim/50 outline-none focus:ring-1 focus:ring-glow-purple/40" />
+                <button onClick={handleAddItem} disabled={!bucketText.trim()}
+                  className="px-4 rounded-lg bg-gradient-to-r from-glow-purple to-glow-pink text-white text-sm font-semibold disabled:opacity-40">＋</button>
+              </div>
+              {bucketError && <p className="text-red-400 text-xs text-center">{bucketError}</p>}
+
+              <div className="space-y-1.5">
+                {items.filter((i) => i.category === bucketCat).sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1)).map((it) => (
+                  <div key={it.id} className="glass px-3 py-2.5 flex items-center gap-2.5 group">
+                    <button onClick={() => toggleItem(it.id, !it.done)}
+                      className={`w-5 h-5 rounded-full border shrink-0 flex items-center justify-center text-[10px] transition-all ${it.done ? "border-glow-purple bg-glow-purple/30 text-glow-purple" : "border-white/20 text-transparent hover:border-glow-purple/50"}`}>
+                      ✓
+                    </button>
+                    <span className={`flex-1 text-sm ${it.done ? "text-star-dim/50 line-through" : "text-star"}`}>{it.text}</span>
+                    {it.created_by === user?.id
+                      ? <span className="w-2 h-2 rounded-full bg-you/70 shrink-0" title={user?.name} />
+                      : <span className="w-2 h-2 rounded-full bg-me/70 shrink-0" title={partner?.name} />}
+                    <button onClick={() => removeItem(it.id)} className="text-star-dim hover:text-red-400 text-sm opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                  </div>
+                ))}
+                {items.filter((i) => i.category === bucketCat).length === 0 && (
+                  <p className="text-star-dim text-center py-10 text-sm">還沒有東西，快加一個吧</p>
+                )}
+              </div>
+            </div>
+          )}
+
+      {/* Day detail + add event modal */}
       {showAdd && selectedDate && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => setShowAdd(false)}>
-          <div className="glass p-5 w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="font-display font-bold text-star">新增事件</h3>
-            <p className="text-xs text-star-dim">{selectedDate}</p>
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
-              placeholder="事件標題" className="w-full px-3 py-2.5 bg-white/5 rounded-lg text-star placeholder-star-dim/50 outline-none" autoFocus />
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center" onClick={() => { setShowAdd(false); setAddError(""); }}>
+          <div className="glass p-5 w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl space-y-4 max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div>
+              <h3 className="font-display font-bold text-star">{selectedDate}</h3>
+              <p className="text-xs text-star-dim mt-0.5">{new Date(selectedDate + "T00:00:00").toLocaleDateString("zh-TW", { weekday: "long" })}</p>
+            </div>
+
+            {/* 當天已有的事件：可以在這裡直接刪除、加表情 */}
+            {(allEvents[selectedDate] || []).length > 0 && (
+              <div className="space-y-1.5 border-b border-white/10 pb-3">
+                {(allEvents[selectedDate] || []).map((ev, j) => (
+                  <div key={`${ev.id}-${j}`} className="flex items-center gap-2 group">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${C[ev.type]?.dot}`} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-star text-sm">
+                        {ev.time && <span className="text-star-dim text-xs mr-1.5">{ev.time.slice(0, 5)}</span>}
+                        {ev.title}
+                      </span>
+                      {ev.notes && <p className="text-[10px] text-star-dim truncate">{ev.notes}</p>}
+                    </div>
+                    {ev.repeat && <span className="text-[9px] text-star-dim/50">↻{ev.repeat === "weekly" ? "週" : ev.repeat === "monthly" ? "月" : "年"}</span>}
+                    {ev.emoji && <span className="text-xs">{ev.emoji}</span>}
+                    <div className="flex items-center gap-0.5">
+                      {REACTIONS.slice(0, 3).map((e) => (
+                        <button key={e} onClick={() => reactEvent(ev.id, e)} className="text-xs opacity-40 hover:opacity-100 hover:scale-125 transition-all">{e}</button>
+                      ))}
+                    </div>
+                    <button onClick={() => removeEvent(ev.id)} className="text-star-dim hover:text-red-400 text-sm px-1">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
+                placeholder="新增事件…" className="flex-1 px-3 py-2.5 bg-white/5 rounded-lg text-star placeholder-star-dim/50 outline-none focus:ring-1 focus:ring-glow-purple/40" autoFocus />
+              <input type="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })}
+                className="w-24 px-2 py-2.5 bg-white/5 rounded-lg text-star text-sm outline-none focus:ring-1 focus:ring-glow-purple/40" />
+            </div>
             <div className="flex gap-2">
               {["you","me","us"].map((t) => (
                 <button key={t} onClick={() => setForm({ ...form, type: t })}
-                  className={`flex-1 py-2 rounded-lg text-sm border ${form.type === t ? `${C[t].border} ${C[t].bg} ${C[t].text}` : "border-white/10 text-star-dim"}`}>{LABEL[t]}</button>
+                  className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${form.type === t ? `${C[t].border} ${C[t].bg} ${C[t].text}` : "border-white/10 text-star-dim"}`}>{LABEL[t]}</button>
               ))}
             </div>
             <div className="flex gap-2">
-              {[{ k: null, v: "單次" }, { k: "weekly", v: "每週" }, { k: "monthly", v: "每月" }].map(({ k, v }) => (
+              {[{ k: null, v: "單次" }, { k: "weekly", v: "每週" }, { k: "monthly", v: "每月" }, { k: "yearly", v: "每年" }].map(({ k, v }) => (
                 <button key={v} onClick={() => setForm({ ...form, repeat: k })}
-                  className={`flex-1 py-2 rounded-lg text-sm border ${form.repeat === k ? "border-glow-purple bg-us/15 text-glow-purple" : "border-white/10 text-star-dim"}`}>{v}</button>
+                  className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${form.repeat === k ? "border-glow-purple bg-us/15 text-glow-purple" : "border-white/10 text-star-dim"}`}>{v}</button>
               ))}
             </div>
+            <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder="備註（選填）" rows={2}
+              className="w-full px-3 py-2.5 bg-white/5 rounded-lg text-star text-sm placeholder-star-dim/50 outline-none resize-none focus:ring-1 focus:ring-glow-purple/40" />
+            {addError && <p className="text-red-400 text-xs text-center">{addError}</p>}
             <div className="flex gap-2">
-              <button onClick={() => { setShowAdd(false); setSelectedDate(null); }} className="flex-1 py-2.5 rounded-xl border border-white/10 text-star-dim text-sm">取消</button>
-              <button onClick={handleAdd} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-glow-purple to-glow-pink text-white font-semibold text-sm">新增</button>
+              <button onClick={() => { setShowAdd(false); setSelectedDate(null); setAddError(""); }} className="flex-1 py-2.5 rounded-xl border border-white/10 text-star-dim text-sm">取消</button>
+              <button onClick={handleAdd} disabled={!form.title}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-glow-purple to-glow-pink text-white font-semibold text-sm disabled:opacity-40 disabled:cursor-not-allowed">新增</button>
             </div>
           </div>
         </div>
