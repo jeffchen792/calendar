@@ -136,6 +136,15 @@ export default function Dashboard() {
         </div>
       </header>
 
+      {/* Invite code banner — shown until partner joins */}
+      {user?.pairCode && user?.pairCode !== partner?.pairCode && (
+        <div className="glass mx-3 mt-2 p-3 text-center border border-glow-purple/30">
+          <p className="text-xs text-star-dim">你的邀請碼</p>
+          <p className="text-lg font-mono font-bold tracking-[0.2em] text-glow-purple select-all mt-1">{user.pairCode}</p>
+          <p className="text-[10px] text-star-dim mt-1">分享給對方，在「加入星系」輸入</p>
+        </div>
+      )}
+
       {/* Mood picker */}
       {showMood && (
         <div className="glass mx-3 mt-2 p-3 flex gap-3 justify-center">
