@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-cosmic-bg text-star antialiased;
+  font-family: 'Inter', system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar { width: 0; }
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+    box-shadow: 0 0 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  .btn-primary {
+    @apply px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-300;
+    background: linear-gradient(135deg, #c084fc, #f472b6);
+    box-shadow: 0 0 20px rgba(192,132,252,0.3);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 0 30px rgba(192,132,252,0.5);
+    transform: translateY(-1px);
+  }
+}
