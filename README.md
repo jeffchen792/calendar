@@ -1,16 +1,32 @@
-# React + Vite
+# Cosmic ✦ 雙星日曆
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+情侶的 3D 星系日曆 — 你們的時間是一個共同的世界。
 
-Currently, two official plugins are available:
+## 技術棧
+- Vite + React 19
+- Tailwind CSS v3
+- Zustand (狀態管理)
+- React Three Fiber (3D — Phase 2)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Phase 1 (當前)
+- [x] 專案骨架
+- [x] 雙人配對（邀請碼）
+- [x] 事件 CRUD（你/他/我們）
+- [ ] Supabase 即時同步
+- [ ] 2D 月曆檢視
 
-## React Compiler
+## Phase 2
+- [ ] 雙星軌道 3D 場景
+- [ ] 事件行星（軌道位置對應日期）
+- [ ] Scroll-driven 相機時間軸
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Phase 3
+- [ ] 每日小紙條（光點留言）
+- [ ] 心情天氣（星球顏色變化）
+- [ ] 紀念日合體動畫
 
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+## 啟動
+```bash
+npm install
+npm run dev
+```
