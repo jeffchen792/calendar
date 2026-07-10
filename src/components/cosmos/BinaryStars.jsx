@@ -14,7 +14,7 @@ const COLORS = { you: "#f472b6", me: "#60a5fa", us: "#c084fc" };
 const ORBIT_R = 3.2;
 const OMEGA = 0.15;
 
-export default function BinaryStars({ events = [], pairedAt }) {
+export default function BinaryStars({ events = [], pairedAt, mergeMode = false, mergeProgress = 0 }) {
   const starARef = useRef();
   const starBRef = useRef();
   const groupRef = useRef();
@@ -50,11 +50,18 @@ export default function BinaryStars({ events = [], pairedAt }) {
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
 
+    // Merge mode: shrink orbit
+    const radius = mergeMode
+      ? THREE.MathUtils.damp(starARef.current?.userData?.prevR || ORBIT_R, 0.8, 5, delta)
+      : ORBIT_R;
+    if (starARef.current) starARef.current.userData = { prevR: radius };
+    const omega = mergeMode ? OMEGA * 3 : OMEGA;
+
     // Binary star orbit
-    const aX = Math.cos(t * OMEGA) * ORBIT_R;
-    const aZ = Math.sin(t * OMEGA) * ORBIT_R;
-    const bX = Math.cos(t * OMEGA + Math.PI) * ORBIT_R;
-    const bZ = Math.sin(t * OMEGA + Math.PI) * ORBIT_R;
+    const aX = Math.cos(t * omega) * radius;
+    const aZ = Math.sin(t * omega) * radius;
+    const bX = Math.cos(t * omega + Math.PI) * radius;
+    const bZ = Math.sin(t * omega + Math.PI) * radius;
 
     if (starARef.current) starARef.current.position.set(aX, 0, aZ);
     if (starBRef.current) starBRef.current.position.set(bX, 0, bZ);

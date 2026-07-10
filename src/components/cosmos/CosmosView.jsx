@@ -5,15 +5,17 @@ import { supabase } from "../../lib/supabase";
 import { useAuth, useNotes } from "../../store";
 import BinaryStars from "./BinaryStars";
 import NoteSparks from "./NoteSparks";
+import MergeCelebration from "./MergeCelebration";
 import { cosmosState } from "./cosmosState";
 
-function Scene({ events, pairedAt, onStarClick }) {
+function Scene({ events, pairedAt, mergeMode, mergeProgress }) {
   return (
     <>
       <color attach="background" args={["#050310"]} />
       <ambientLight intensity={0.4} />
-      <BinaryStars events={events} pairedAt={pairedAt} />
-      <NoteSparks onStarClick={onStarClick} />
+      <BinaryStars events={events} pairedAt={pairedAt} mergeMode={mergeMode} mergeProgress={mergeProgress} />
+      <NoteSparks />
+      <MergeCelebration active={mergeMode && mergeProgress > 0} progress={mergeProgress} />
     </>
   );
 }
@@ -25,9 +27,50 @@ export default function CosmosView({ events, user, partner, pairedAt, onBack }) 
   const [todayNotes, setTodayNotes] = useState([]);
   const [showNotes, setShowNotes] = useState(false);
 
-  const daysTogether = pairedAt
-    ? Math.floor((Date.now() - new Date(pairedAt)) / 86400000)
-    : 1;
+  // ── Anniversary detection ──
+  const isTest = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("merge");
+  const anniversary = useMemo(() => {
+    if (!pairedAt) return null;
+    // Find the next anniversary of pairedAt
+    const start = new Date(pairedAt);
+    const today = new Date();
+    let anni = new Date(today.getFullYear(), start.getMonth(), start.getDate());
+    if (anni < today) anni.setFullYear(anni.getFullYear() + 1);
+    const daysLeft = Math.ceil((anni - today) / 86400000);
+    return { date: anni, daysLeft };
+  }, [pairedAt]);
+
+  const mergeMode = isTest || (anniversary && anniversary.daysLeft <= 7);
+  const mergeToday = isTest || (anniversary && anniversary.daysLeft === 0);
+  const [mergePlayed, setMergePlayed] = useState(false);
+  const [mergeProgress, setMergeProgress] = useState(0);
+
+  // Play merge animation once per day
+  useEffect(() => {
+    if (!mergeToday) return;
+    const key = `merge_played_${new Date().toISOString().slice(0, 10)}`;
+    if (localStorage.getItem(key)) { setMergePlayed(true); return; }
+    let t = 0;
+    const step = () => {
+      t += 0.016;
+      const p = Math.min(1, t / 3); // 3 second animation
+      setMergeProgress(p);
+      cosmosState.mergeProgress = p;
+      if (t < 3) requestAnimationFrame(step);
+      else { localStorage.setItem(key, "1"); setMergePlayed(true); }
+    };
+    requestAnimationFrame(step);
+  }, [mergeToday]);
+
+  const daysTogether = pairedAt ? Math.floor((Date.now() - new Date(pairedAt)) / 86400000) : 1;
+
+  // Show merge mode text
+  const mergeText = useMemo(() => {
+    if (!mergeMode || !pairedAt) return null;
+    const years = Math.floor(daysTogether / 365);
+    if (mergeToday) return `在一起 ${years} 年 ✦ ${new Date(pairedAt).toISOString().slice(0, 10)}`;
+    return `${anniversary?.daysLeft || "?"} 天後紀念日`;
+  }, [mergeMode, mergeToday, daysTogether, pairedAt]);
 
   const upcoming = events
     .filter((ev) => new Date(ev.date) >= new Date())
@@ -98,7 +141,7 @@ export default function CosmosView({ events, user, partner, pairedAt, onBack }) 
           camera={{ position: [0, 4, 14], fov: 45, near: 0.1, far: 100 }}
         >
           <Suspense fallback={null}>
-            <Scene events={events} pairedAt={pairedAt} onStarClick={handleStarClick} />
+            <Scene events={events} pairedAt={pairedAt} mergeMode={mergeMode} mergeProgress={mergeProgress} />
           </Suspense>
         </Canvas>
       </div>
