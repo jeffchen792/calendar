@@ -1,11 +1,15 @@
-import { useState, useMemo } from "react";
-import { useAuth, useEvents } from "../store";
+import { useState, useMemo, useEffect } from "react";
+import { useAuth, useEvents, useMood, useMissYou, getRecurringDates } from "../store";
 import FloatingPhotos from "../components/FloatingPhotos";
 
-const COLORS = { you: { border: "border-you", text: "text-you", bg: "bg-you/15", dot: "bg-you" },
+const C = {
+  you: { border: "border-you", text: "text-you", bg: "bg-you/15", dot: "bg-you" },
   me: { border: "border-me", text: "text-me", bg: "bg-me/15", dot: "bg-me" },
-  us: { border: "border-us", text: "text-us", bg: "bg-us/15", dot: "bg-us" } };
+  us: { border: "border-us", text: "text-us", bg: "bg-us/15", dot: "bg-us" },
+};
 const LABEL = { you: "你", me: "他", us: "我們" };
+const MOODS = { sunny: "☀️", cloudy: "☁️", rainy: "🌧️", stormy: "⛈️" };
+const REACTIONS = ["❤️", "😂", "🥺", "🎉", "💪"];
 
 function getMonthDays(year, month) {
   const first = new Date(year, month, 1);
@@ -17,68 +21,124 @@ function getMonthDays(year, month) {
   return days;
 }
 
+function sameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
+
 export default function Dashboard() {
-  const { user, setUser } = useAuth();
-  const { events, addEvent, removeEvent } = useEvents();
+  const { user, partner, setUser } = useAuth();
+  const { events, addEvent, removeEvent, reactEvent } = useEvents();
+  const { myMood, setMyMood, partnerMood } = useMood();
+  const { pings, sendPing, clearPings } = useMissYou();
+
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [view, setView] = useState("month");
   const [showAdd, setShowAdd] = useState(false);
   const [selectedDate, setSelectedDate] = useState(null);
-  const [form, setForm] = useState({ title: "", type: "us", notes: "" });
-  const [view, setView] = useState("month"); // month | list
+  const [form, setForm] = useState({ title: "", type: "us", repeat: null, notes: "" });
+  const [showMood, setShowMood] = useState(false);
+
+  // Load saved mood
+  useEffect(() => { setMyMood(localStorage.getItem("cosmic_mood") || null); }, []);
 
   const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   const weekDays = ["日","一","二","三","四","五","六"];
   const days = useMemo(() => getMonthDays(year, month), [year, month]);
+  const todayStr = today.toISOString().slice(0, 10);
 
-  const eventsByDate = useMemo(() => {
+  // Merge recurring events
+  const allEvents = useMemo(() => {
     const map = {};
     events.forEach((ev) => {
-      const key = ev.date;
-      if (!map[key]) map[key] = [];
-      map[key].push(ev);
+      const add = (date) => {
+        if (!map[date]) map[date] = [];
+        map[date].push(ev);
+      };
+      add(ev.date);
+      if (ev.repeat) getRecurringDates(ev).forEach((d) => add(d));
     });
     return map;
   }, [events]);
 
-  const todayStr = today.toISOString().slice(0, 10);
+  // "This day last year"
+  const oneYearAgo = useMemo(() => {
+    const d = new Date(today); d.setFullYear(d.getFullYear() - 1);
+    return { date: d.toISOString().slice(0, 10), events: allEvents[d.toISOString().slice(0, 10)] || [] };
+  }, [allEvents]);
 
   const prevMonth = () => { if (month === 0) { setYear(y => y-1); setMonth(11); } else setMonth(m => m-1); };
   const nextMonth = () => { if (month === 11) { setYear(y => y+1); setMonth(0); } else setMonth(m => m+1); };
 
-  const handleDayClick = (date) => {
-    setSelectedDate(date);
-    setShowAdd(true);
-  };
-
   const handleAdd = () => {
     if (!form.title || !selectedDate) return;
-    addEvent({ id: crypto.randomUUID(), title: form.title, date: selectedDate, type: form.type, notes: form.notes, createdAt: new Date().toISOString() });
-    setForm({ title: "", type: "us", notes: "" });
-    setShowAdd(false);
-    setSelectedDate(null);
+    addEvent({ id: crypto.randomUUID(), title: form.title, date: selectedDate, type: form.type, repeat: form.repeat, notes: form.notes, emoji: null, createdAt: new Date().toISOString() });
+    setForm({ title: "", type: "us", repeat: null, notes: "" });
+    setShowAdd(false); setSelectedDate(null);
   };
 
   return (
     <div className="min-h-screen bg-cosmic-bg pb-24 relative">
       <FloatingPhotos />
+
+      {/* Miss-you ping animation */}
+      {pings.length > 0 && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none" onClick={clearPings}>
+          {pings.map((p) => (
+            <span key={p.id} className="absolute text-2xl animate-bounce opacity-0"
+              style={{ animation: `pingFly 2s ease-out forwards`, animationDelay: "0s" }}>
+              💫
+            </span>
+          ))}
+        </div>
+      )}
+
       {/* Header */}
       <header className="glass mx-3 mt-3 p-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
+          <button onClick={() => setShowMood(!showMood)} className="text-xl" title="心情">
+            {myMood ? MOODS[myMood] : "🌤️"}
+          </button>
           <div className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-full bg-you" />
-            <span className="text-star text-sm font-medium">{user?.name || "你"}</span>
+            <span className="text-star text-sm font-medium">{user?.name}</span>
+            {myMood && <span className="text-xs">{MOODS[myMood]}</span>}
           </div>
           <span className="text-star-dim text-xs">✦</span>
           <div className="flex items-center gap-1.5">
-            <span className="text-star text-sm font-medium">{user?.partner ? user.partner.name : "???"}</span>
+            {partnerMood && <span className="text-xs">{MOODS[partnerMood]}</span>}
+            <span className="text-star text-sm font-medium">{partner?.name || "???"}</span>
             <span className="w-3 h-3 rounded-full bg-me" />
           </div>
         </div>
-        <button onClick={() => { localStorage.removeItem("cosmic_user"); setUser(null); }}
-          className="text-star-dim hover:text-star text-xs">登出</button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => sendPing({ id: crypto.randomUUID(), from: user?.name, at: new Date().toISOString() })}
+            className="text-sm hover:scale-110 transition-transform" title="想你">💫</button>
+          <button onClick={() => { localStorage.removeItem("cosmic_user"); setUser(null); }}
+            className="text-star-dim hover:text-star text-xs">登出</button>
+        </div>
       </header>
+
+      {/* Mood picker */}
+      {showMood && (
+        <div className="glass mx-3 mt-2 p-3 flex gap-3 justify-center">
+          {Object.entries(MOODS).map(([key, emoji]) => (
+            <button key={key} onClick={() => { setMyMood(key); setShowMood(false); }}
+              className={`text-2xl p-1.5 rounded-lg transition-all ${myMood === key ? "bg-white/10 scale-125" : "opacity-50 hover:opacity-100"}`}>
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* "This day last year" banner */}
+      {oneYearAgo.events.length > 0 && (
+        <div className="glass mx-3 mt-3 p-3 border-l-2 border-gold/50">
+          <p className="text-xs text-star-dim">去年的今天</p>
+          {oneYearAgo.events.map((ev) => (
+            <p key={ev.id} className="text-sm text-star mt-1">{ev.title}</p>
+          ))}
+        </div>
+      )}
 
       {/* Month navigator */}
       <div className="flex items-center justify-between mx-3 mt-4 px-2">
@@ -91,69 +151,58 @@ export default function Dashboard() {
         <button onClick={nextMonth} className="text-star-dim hover:text-star text-xl px-2">›</button>
       </div>
 
-      {/* View toggle */}
-      <div className="flex mx-3 mt-2 bg-white/5 rounded-lg p-0.5">
-        {["month","list"].map((v) => (
-          <button key={v} onClick={() => setView(v)}
-            className={`flex-1 py-1.5 text-xs rounded-md transition-all ${view === v ? "bg-white/10 text-star" : "text-star-dim"}`}>
-            {v === "month" ? "月曆" : "列表"}
-          </button>
-        ))}
+      {/* Calendar grid */}
+      <div className="mx-2 mt-3">
+        <div className="grid grid-cols-7 text-center mb-1">
+          {weekDays.map((d, i) => (
+            <div key={i} className={`text-xs py-1 ${i === 0 || i === 6 ? "text-star-dim/50" : "text-star-dim/70"}`}>{d}</div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
+          {days.map((date, i) => {
+            if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
+            const ds = date.toISOString().slice(0, 10);
+            const isToday = ds === todayStr;
+            const dayEvents = allEvents[ds] || [];
+            return (
+              <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
+                className={`aspect-square bg-cosmic-deep/80 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
+                <div className="flex flex-wrap gap-0.5 mt-0.5">
+                  {dayEvents.slice(0, 3).map((ev) => (
+                    <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Calendar grid */}
-      {view === "month" && (
-        <div className="mx-2 mt-3">
-          <div className="grid grid-cols-7 text-center mb-1">
-            {weekDays.map((d, i) => (
-              <div key={i} className={`text-xs py-1 ${i === 0 || i === 6 ? "text-star-dim/50" : "text-star-dim/70"}`}>{d}</div>
+      {/* Event list */}
+      <div className="mx-3 mt-6 space-y-2">
+        {Object.entries(allEvents).sort(([a],[b]) => a.localeCompare(b)).map(([date, evs]) => (
+          <div key={date} className="glass p-3">
+            <div className="text-xs text-star-dim mb-2">{date} ({new Date(date).toLocaleDateString("zh-TW", { weekday: "short" })})</div>
+            {evs.map((ev) => (
+              <div key={ev.id} className="flex items-center gap-2 py-1.5 border-t border-white/5 group">
+                <span className={`w-2 h-2 rounded-full ${C[ev.type]?.dot}`} />
+                <span className="text-star text-sm flex-1">{ev.title}</span>
+                {ev.repeat && <span className="text-[9px] text-star-dim/50 mr-1">↻{ev.repeat === "weekly" ? "週" : "月"}</span>}
+                {/* Emoji reactions */}
+                {ev.emoji && <span className="text-xs">{ev.emoji}</span>}
+                <div className="hidden group-hover:flex items-center gap-0.5">
+                  {REACTIONS.map((e) => (
+                    <button key={e} onClick={() => reactEvent(ev.id, e)} className="text-xs hover:scale-125 transition-transform">{e}</button>
+                  ))}
+                </div>
+                <span className={`text-[10px] ${C[ev.type]?.text}`}>{LABEL[ev.type]}</span>
+                <button onClick={() => removeEvent(ev.id)} className="text-star-dim hover:text-red-400 text-xs ml-1">×</button>
+              </div>
             ))}
           </div>
-          <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
-            {days.map((date, i) => {
-              if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
-              const ds = date.toISOString().slice(0, 10);
-              const isToday = ds === todayStr;
-              const dayEvents = eventsByDate[ds] || [];
-              return (
-                <div key={ds} onClick={() => handleDayClick(ds)}
-                  className={`aspect-square bg-cosmic-deep/80 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${
-                    isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
-                  <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
-                  <div className="flex flex-wrap gap-0.5 mt-0.5">
-                    {dayEvents.slice(0, 3).map((ev) => (
-                      <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${COLORS[ev.type]?.dot || "bg-white/30"}`} />
-                    ))}
-                    {dayEvents.length > 3 && <span className="text-[8px] text-star-dim/40">+{dayEvents.length - 3}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* List view */}
-      {view === "list" && (
-        <div className="mx-3 mt-4 space-y-2">
-          {Object.entries(eventsByDate).sort(([a],[b]) => a.localeCompare(b)).map(([date, evs]) => (
-            <div key={date} className="glass p-3">
-              <div className="text-xs text-star-dim mb-2">{date} ({new Date(date).toLocaleDateString("zh-TW", { weekday: "short" })})</div>
-              {evs.map((ev) => (
-                <div key={ev.id} className={`flex items-center gap-2 py-1.5 border-t border-white/5`}>
-                  <span className={`w-2 h-2 rounded-full ${COLORS[ev.type]?.dot}`} />
-                  <span className="text-star text-sm flex-1">{ev.title}</span>
-                  <span className={`text-[10px] ${COLORS[ev.type]?.text}`}>{LABEL[ev.type]}</span>
-                  <button onClick={() => removeEvent(ev.id)} className="text-star-dim hover:text-red-400 text-xs ml-1">×</button>
-                </div>
-              ))}
-            </div>
-          ))}
-          {Object.keys(eventsByDate).length === 0 && (
-            <p className="text-star-dim text-center py-12">尚無事件，點月曆中的日期來新增</p>
-          )}
-        </div>
-      )}
+        ))}
+      </div>
 
       {/* Add event modal */}
       {showAdd && selectedDate && (
@@ -166,34 +215,39 @@ export default function Dashboard() {
             <div className="flex gap-2">
               {["you","me","us"].map((t) => (
                 <button key={t} onClick={() => setForm({ ...form, type: t })}
-                  className={`flex-1 py-2 rounded-lg text-sm border transition-all ${form.type === t ? `${COLORS[t].border} ${COLORS[t].bg} ${COLORS[t].text}` : "border-white/10 text-star-dim"}`}>
-                  {LABEL[t]}
-                </button>
+                  className={`flex-1 py-2 rounded-lg text-sm border ${form.type === t ? `${C[t].border} ${C[t].bg} ${C[t].text}` : "border-white/10 text-star-dim"}`}>{LABEL[t]}</button>
               ))}
             </div>
             <div className="flex gap-2">
-              <button onClick={() => { setShowAdd(false); setSelectedDate(null); }}
-                className="flex-1 py-2.5 rounded-xl border border-white/10 text-star-dim text-sm">取消</button>
+              {[{ k: null, v: "單次" }, { k: "weekly", v: "每週" }, { k: "monthly", v: "每月" }].map(({ k, v }) => (
+                <button key={v} onClick={() => setForm({ ...form, repeat: k })}
+                  className={`flex-1 py-2 rounded-lg text-sm border ${form.repeat === k ? "border-glow-purple bg-us/15 text-glow-purple" : "border-white/10 text-star-dim"}`}>{v}</button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => { setShowAdd(false); setSelectedDate(null); }} className="flex-1 py-2.5 rounded-xl border border-white/10 text-star-dim text-sm">取消</button>
               <button onClick={handleAdd} className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-glow-purple to-glow-pink text-white font-semibold text-sm">新增</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Bottom bar on month view */}
-      {view === "month" && (
-        <div className="fixed bottom-0 left-0 right-0 p-3 bg-cosmic-bg/90 backdrop-blur-xl border-t border-white/5">
-          <div className="flex gap-2">
-            {["you","me","us"].map((t) => (
-              <div key={t} className="flex items-center gap-1.5 text-xs text-star-dim">
-                <span className={`w-2 h-2 rounded-full ${COLORS[t].dot}`} />{LABEL[t]}
-              </div>
-            ))}
-            <div className="flex-1" />
-            <span className="text-xs text-star-dim">{events.length} 個事件</span>
-          </div>
+      {/* Bottom legend */}
+      <div className="fixed bottom-0 left-0 right-0 p-3 bg-cosmic-bg/90 backdrop-blur-xl border-t border-white/5">
+        <div className="flex gap-2">
+          {["you","me","us"].map((t) => (
+            <div key={t} className="flex items-center gap-1.5 text-xs text-star-dim">
+              <span className={`w-2 h-2 rounded-full ${C[t].dot}`} />{LABEL[t]}
+            </div>
+          ))}
+          <div className="flex-1" />
+          <span className="text-xs text-star-dim">{Object.values(allEvents).flat().length} 個事件</span>
         </div>
-      )}
+      </div>
+
+      <style>{`
+        @keyframes pingFly { 0% { opacity:1; transform: translateY(0) scale(0.5); } 50% { opacity:0.8; transform: translateY(-60px) scale(1.2); } 100% { opacity:0; transform: translateY(-120px) scale(0.3); } }
+      `}</style>
     </div>
   );
 }
