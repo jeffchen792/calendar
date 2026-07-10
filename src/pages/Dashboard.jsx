@@ -38,6 +38,10 @@ export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState(null);
   const [form, setForm] = useState({ title: "", type: "us", repeat: null, notes: "" });
   const [showMood, setShowMood] = useState(false);
+  const [showPairedEdit, setShowPairedEdit] = useState(false);
+  const [pairedDate, setPairedDate] = useState(user?.pairedAt || "");
+
+  const daysTgt = (d) => d ? Math.floor((Date.now() - new Date(d)) / 86400000) : 0;
 
   // Load saved mood
   useEffect(() => { setMyMood(localStorage.getItem("cosmic_mood") || null); }, []);
@@ -113,7 +117,7 @@ export default function Dashboard() {
 
       {/* Header */}
       <header className="glass mx-3 mt-3 p-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button onClick={() => setShowMood(!showMood)} className="text-xl" title="心情">
             {myMood ? MOODS[myMood] : "🌤️"}
           </button>
@@ -123,6 +127,11 @@ export default function Dashboard() {
             {myMood && <span className="text-xs">{MOODS[myMood]}</span>}
           </div>
           <span className="text-star-dim text-xs">✦</span>
+          {user?.pairedAt && (
+            <span onClick={() => setShowPairedEdit(!showPairedEdit)} className="text-[10px] text-star-dim cursor-pointer hover:text-star">
+              {daysTgt(user.pairedAt)}天
+            </span>
+          )}
           <div className="flex items-center gap-1.5">
             {partnerMood && <span className="text-xs">{MOODS[partnerMood]}</span>}
             <span className="text-star text-sm font-medium">{partner?.name || "???"}</span>
@@ -165,6 +174,20 @@ export default function Dashboard() {
           {oneYearAgo.events.map((ev) => (
             <p key={ev.id} className="text-sm text-star mt-1">{ev.title}</p>
           ))}
+        </div>
+      )}
+
+      {/* Paired date editor */}
+      {showPairedEdit && (
+        <div className="glass mx-3 mt-2 p-3 flex gap-2 items-center justify-center">
+          <input type="date" value={pairedDate} onChange={(e) => setPairedDate(e.target.value)}
+            className="px-3 py-1.5 bg-white/5 rounded-lg text-star text-sm outline-none" />
+          <button onClick={() => {
+            const u = { ...user, pairedAt: pairedDate };
+            localStorage.setItem("cosmic_user", JSON.stringify(u));
+            setUser(u);
+            setShowPairedEdit(false);
+          }} className="px-3 py-1.5 rounded-lg bg-glow-purple/20 text-glow-purple text-sm">儲存</button>
         </div>
       )}
 
