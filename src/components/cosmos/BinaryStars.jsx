@@ -20,17 +20,36 @@ export default function BinaryStars({ events = [], pairedAt, mergeMode = false }
   const orbitRingRef = useRef();
   const prevR = useRef(ORBIT_R);
 
+  // 放射漸層貼圖：星球光暈與圓形軟星塵共用（不用 postprocessing 的發光方案）
+  const glowTex = useMemo(() => {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const g = c.getContext("2d");
+    const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+    grad.addColorStop(0, "rgba(255,255,255,1)");
+    grad.addColorStop(0.3, "rgba(255,255,255,0.4)");
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+    return new THREE.CanvasTexture(c);
+  }, []);
+
   const starGeo = useMemo(() => new THREE.SphereGeometry(0.8, 32, 32), []);
   const planetGeo = useMemo(() => new THREE.SphereGeometry(0.18, 16, 16), []);
   const orbitGeo = useMemo(() => new THREE.TorusGeometry(ORBIT_R, 0.012, 16, 120), []);
 
   const dustGeo = useMemo(() => {
     const g = new THREE.BufferGeometry();
-    const p = new Float32Array(250 * 3);
-    for (let i = 0; i < 250 * 3; i++) p[i] = (Math.random() - 0.5) * 30;
+    const p = new Float32Array(250 * 3), col = new Float32Array(250 * 3);
+    const hues = [[0.96, 0.45, 0.71], [0.38, 0.65, 0.98], [0.75, 0.52, 0.99]]; // 粉/藍/紫
+    for (let i = 0; i < 250; i++) {
+      for (let j = 0; j < 3; j++) p[i * 3 + j] = (Math.random() - 0.5) * 30;
+      const h = hues[i % 3], b = 0.5 + Math.random() * 0.5;
+      col.set([h[0] * b, h[1] * b, h[2] * b], i * 3);
+    }
     g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(col, 3));
     return g;
   }, []);
+  const dustMatRef = useRef();
 
   const now = new Date();
   const futureEvents = useMemo(() =>
@@ -63,12 +82,14 @@ export default function BinaryStars({ events = [], pairedAt, mergeMode = false }
     if (orbitRingRef.current) orbitRingRef.current.scale.setScalar(radius / ORBIT_R);
 
     if (groupRef.current) groupRef.current.rotation.y += delta * 0.02;
+    if (dustMatRef.current) dustMatRef.current.opacity = 0.55 + Math.sin(t * 0.8) * 0.2; // 星塵閃爍
   });
 
   return (
     <group ref={groupRef}>
       <points geometry={dustGeo}>
-        <pointsMaterial size={0.06} color="#ffffff" opacity={0.6} transparent depthWrite={false} />
+        <pointsMaterial ref={dustMatRef} size={0.18} map={glowTex} vertexColors transparent opacity={0.6}
+          depthWrite={false} blending={THREE.AdditiveBlending} />
       </points>
 
       <mesh ref={orbitRingRef} geometry={orbitGeo} rotation={[Math.PI / 2, 0, 0]}>
@@ -77,15 +98,23 @@ export default function BinaryStars({ events = [], pairedAt, mergeMode = false }
 
       <group ref={starARef}>
         <mesh geometry={starGeo}>
-          <meshStandardMaterial color={COLORS.you} emissive={COLORS.you} emissiveIntensity={0.6} roughness={0.3} />
+          <meshStandardMaterial color={COLORS.you} emissive={COLORS.you} emissiveIntensity={0.9} roughness={0.3} />
         </mesh>
+        <sprite scale={[3.6, 3.6, 1]}>
+          <spriteMaterial map={glowTex} color={COLORS.you} transparent opacity={0.55}
+            blending={THREE.AdditiveBlending} depthWrite={false} />
+        </sprite>
         <pointLight intensity={1} distance={8} color={COLORS.you} />
       </group>
 
       <group ref={starBRef}>
         <mesh geometry={starGeo}>
-          <meshStandardMaterial color={COLORS.me} emissive={COLORS.me} emissiveIntensity={0.6} roughness={0.3} />
+          <meshStandardMaterial color={COLORS.me} emissive={COLORS.me} emissiveIntensity={0.9} roughness={0.3} />
         </mesh>
+        <sprite scale={[3.6, 3.6, 1]}>
+          <spriteMaterial map={glowTex} color={COLORS.me} transparent opacity={0.55}
+            blending={THREE.AdditiveBlending} depthWrite={false} />
+        </sprite>
         <pointLight intensity={1} distance={8} color={COLORS.me} />
       </group>
 

@@ -241,7 +241,7 @@ export default function Dashboard() {
                     const dayEvents = allEvents[ds] || [];
                     return (
                       <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
                         <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
                         <div className="flex flex-wrap gap-0.5 mt-0.5">
                           {dayEvents.slice(0, 3).map((ev) => (
@@ -330,6 +330,8 @@ export default function Dashboard() {
 
       <style>{`
         @keyframes pingFly { 0% { opacity:1; transform: translateY(0) scale(0.5); } 50% { opacity:0.8; transform: translateY(-60px) scale(1.2); } 100% { opacity:0; transform: translateY(-120px) scale(0.3); } }
+        @keyframes todayBreathe { 0%,100% { box-shadow: inset 0 0 6px rgba(216,180,254,0.15); } 50% { box-shadow: inset 0 0 14px rgba(216,180,254,0.45); } }
+        .today-breathe { animation: todayBreathe 3s ease-in-out infinite; }
       `}</style>
     </div>
   );
