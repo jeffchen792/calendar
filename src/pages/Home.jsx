@@ -1,24 +1,38 @@
-import { useState, useEffect } from "react";
-import { useAuth } from "../store";
+import { useState } from "react";
+import { useAuth, createPair, joinPair } from "../store";
 
 export default function Home() {
   const { setUser } = useAuth();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
-  const [step, setStep] = useState("start"); // start | create | join
+  const [step, setStep] = useState("start");
+  const [inviteCode, setInviteCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const createPair = () => {
+  const handleCreate = async () => {
     if (!name.trim()) return;
-    const me = { id: crypto.randomUUID(), name: name.trim(), pairCode: crypto.randomUUID().slice(0, 8), paired: false };
-    localStorage.setItem("cosmic_user", JSON.stringify(me));
-    setUser(me);
+    setLoading(true);
+    const pairCode = await createPair(name.trim());
+    if (pairCode) {
+      setInviteCode(pairCode);
+      setStep("showCode");
+    }
+    setLoading(false);
   };
 
-  const joinPair = () => {
+  const handleJoin = async () => {
     if (!name.trim() || !code.trim()) return;
-    const me = { id: crypto.randomUUID(), name: name.trim(), pairCode: code.trim(), paired: true };
-    localStorage.setItem("cosmic_user", JSON.stringify(me));
-    setUser(me);
+    setLoading(true);
+    const result = await joinPair(name.trim(), code.trim());
+    if (result.error) {
+      setError(result.error);
+    }
+    setLoading(false);
+  };
+
+  const copyCode = () => {
+    navigator.clipboard.writeText(inviteCode);
   };
 
   return (
@@ -53,17 +67,32 @@ export default function Home() {
         {step === "create" && (
           <div className="space-y-4">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="你的名字" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none" autoFocus />
-            <button onClick={createPair} className="btn-primary w-full text-white">建立連線</button>
-            <p className="text-xs text-star-dim">建立後會產生邀請碼，分享給對方即可配對</p>
+            <button onClick={handleCreate} className="btn-primary w-full text-white">{loading ? "建立中..." : "建立連線"}</button>
             <button onClick={() => setStep("start")} className="text-star-dim hover:text-star text-sm">← 返回</button>
+          </div>
+        )}
+
+        {step === "showCode" && (
+          <div className="space-y-5">
+            <p className="text-star-dim">你的邀請碼</p>
+            <div className="glass p-6 text-center space-y-3">
+              <p className="text-3xl font-mono font-bold tracking-[0.3em] text-glow-purple select-all">{inviteCode}</p>
+              <button onClick={copyCode} className="text-xs text-star-dim hover:text-star border border-white/10 rounded-lg px-3 py-1">
+                {navigator.clipboard ? "點擊複製" : "長按複製"}
+              </button>
+            </div>
+            <p className="text-xs text-star-dim">把這組碼傳給對方，他在「加入星系」輸入即可配對</p>
+            <button onClick={() => setUser(JSON.parse(localStorage.getItem("cosmic_user")))} className="btn-primary w-full text-white">
+              進入日曆 →
+            </button>
           </div>
         )}
 
         {step === "join" && (
           <div className="space-y-4">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="你的名字" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none" />
-            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="對方的邀請碼" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none" />
-            <button onClick={joinPair} className="btn-primary w-full text-white">加入星系</button>
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="對方給你的 8 碼邀請碼" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none text-center font-mono tracking-widest" maxLength={8} />
+            <button onClick={handleJoin} className="btn-primary w-full text-white">{loading ? "加入中..." : "加入星系"}</button>
             <button onClick={() => setStep("start")} className="text-star-dim hover:text-star text-sm">← 返回</button>
           </div>
         )}

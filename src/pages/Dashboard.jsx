@@ -41,6 +41,22 @@ export default function Dashboard() {
   // Load saved mood
   useEffect(() => { setMyMood(localStorage.getItem("cosmic_mood") || null); }, []);
 
+  // Fetch partner info + subscribe to realtime
+  useEffect(() => {
+    const u = user;
+    if (!u?.pairId) return;
+    import("../store").then(({ subAll, useAuth: a }) => {
+      subAll(u.pairId);
+      // Fetch partner
+      import("../lib/supabase").then(({ supabase: sb }) => {
+        if (!sb) return;
+        sb.from("users").select("*").eq("pair_id", u.pairId).neq("id", u.id).single().then(({ data }) => {
+          if (data) a.getState().setPartner(data);
+        });
+      });
+    });
+  }, [user?.pairId]);
+
   const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   const weekDays = ["日","一","二","三","四","五","六"];
   const days = useMemo(() => getMonthDays(year, month), [year, month]);
