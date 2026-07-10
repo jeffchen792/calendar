@@ -127,11 +127,13 @@ export const useNotes = create((set) => ({
 export async function createPair(name) {
   if (!supabase) return fallbackCreatePair(name);
   // 1. Create pair
-  const { data: pair } = await supabase.from("pairs").insert({ code: crypto.randomUUID().slice(0, 8) }).select().single();
-  if (!pair) return null;
+  const { data: pair, error: e1 } = await supabase.from("pairs").insert({ code: crypto.randomUUID().slice(0, 8) }).select().single();
+  if (e1) { console.error("createPair pairs error:", e1); return null; }
+  if (!pair) { console.error("createPair: no pair returned"); return null; }
   // 2. Create user
-  const { data: user } = await supabase.from("users").insert({ name, pair_id: pair.id }).select().single();
-  if (!user) return null;
+  const { data: user, error: e2 } = await supabase.from("users").insert({ name, pair_id: pair.id }).select().single();
+  if (e2) { console.error("createPair users error:", e2); return null; }
+  if (!user) { console.error("createPair: no user returned"); return null; }
   // 3. Subscribe & save
   subAll(pair.id);
   fetchEvents(pair.id);
@@ -142,7 +144,8 @@ export async function createPair(name) {
 export async function joinPair(name, code) {
   if (!supabase) return fallbackJoinPair(name, code);
   // 1. Find pair
-  const { data: pair } = await supabase.from("pairs").select().eq("code", code).single();
+  const { data: pair, error: e1 } = await supabase.from("pairs").select().eq("code", code).single();
+  if (e1) { console.error("joinPair pairs error:", e1); return { error: e1.message }; }
   if (!pair) return { error: "找不到這個邀請碼" };
   // 2. Create user in this pair
   const { data: user } = await supabase.from("users").insert({ name, pair_id: pair.id }).select().single();
