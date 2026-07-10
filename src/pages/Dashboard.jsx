@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useAuth, useEvents, useMood, useMissYou, getRecurringDates } from "../store";
+import { useAuth, useEvents, useMood, useMissYou, getRecurringDates, fetchPairInfo, updatePairedAt } from "../store";
 import FloatingPhotos from "../components/FloatingPhotos";
 import CosmosView from "../components/cosmos/CosmosView";
 
@@ -46,12 +46,13 @@ export default function Dashboard() {
   // Load saved mood
   useEffect(() => { setMyMood(localStorage.getItem("cosmic_mood") || null); }, []);
 
-  // Fetch partner info + subscribe to realtime
+  // Fetch partner info + subscribe to realtime + sync shared paired_at
   useEffect(() => {
     const u = user;
     if (!u?.pairId) return;
     import("../store").then(({ subAll, useAuth: a }) => {
       subAll(u.pairId);
+      fetchPairInfo(u.pairId);
       // Fetch partner
       import("../lib/supabase").then(({ supabase: sb }) => {
         if (!sb) return;
@@ -61,6 +62,10 @@ export default function Dashboard() {
       });
     });
   }, [user?.pairId]);
+
+  // pairedDate input 要跟著 fetchPairInfo 同步回來的權威值走，
+  // 不能只吃 useState 初始值（那只在 mount 那一刻讀一次）
+  useEffect(() => { setPairedDate(user?.pairedAt || ""); }, [user?.pairedAt]);
 
   const monthNames = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
   const weekDays = ["日","一","二","三","四","五","六"];
@@ -127,11 +132,12 @@ export default function Dashboard() {
             {myMood && <span className="text-xs">{MOODS[myMood]}</span>}
           </div>
           <span className="text-star-dim text-xs">✦</span>
-          {user?.pairedAt && (
-            <span onClick={() => setShowPairedEdit(!showPairedEdit)} className="text-[10px] text-star-dim cursor-pointer hover:text-star">
-              {daysTgt(user.pairedAt)}天
-            </span>
-          )}
+          {/* 一定要能點得到，不能只在已經有日期時才顯示——
+              不然沒設定過的人永遠找不到入口去設定 */}
+          <button onClick={() => setShowPairedEdit(!showPairedEdit)}
+            className="text-[10px] text-star-dim hover:text-star underline decoration-dotted underline-offset-2">
+            {user?.pairedAt ? `${daysTgt(user.pairedAt)}天` : "設定紀念日"}
+          </button>
           <div className="flex items-center gap-1.5">
             {partnerMood && <span className="text-xs">{MOODS[partnerMood]}</span>}
             <span className="text-star text-sm font-medium">{partner?.name || "???"}</span>
@@ -182,10 +188,11 @@ export default function Dashboard() {
         <div className="glass mx-3 mt-2 p-3 flex gap-2 items-center justify-center">
           <input type="date" value={pairedDate} onChange={(e) => setPairedDate(e.target.value)}
             className="px-3 py-1.5 bg-white/5 rounded-lg text-star text-sm outline-none" />
-          <button onClick={() => {
-            const u = { ...user, pairedAt: pairedDate };
-            localStorage.setItem("cosmic_user", JSON.stringify(u));
-            setUser(u);
+          <button onClick={async () => {
+            if (!pairedDate) return;
+            // 寫回 pairs 表，兩人的裝置都會看到同一個日期，
+            // 不是各自存在自己 localStorage 裡各說各話
+            await updatePairedAt(user?.pairId, pairedDate);
             setShowPairedEdit(false);
           }} className="px-3 py-1.5 rounded-lg bg-glow-purple/20 text-glow-purple text-sm">儲存</button>
         </div>
@@ -206,69 +213,77 @@ export default function Dashboard() {
             ))}
           </div>
 
-          {/* Month navigator */}
-      <div className="flex items-center justify-between mx-3 mt-4 px-2">
-        <button onClick={prevMonth} className="text-star-dim hover:text-star text-xl px-2">‹</button>
-        <div className="flex items-center gap-3">
-          <h2 className="text-lg font-display font-bold text-star">{year}年 {monthNames[month]}</h2>
-          <button onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); }}
-            className="text-xs px-2 py-1 rounded-full border border-white/10 text-star-dim hover:text-star">今天</button>
-        </div>
-        <button onClick={nextMonth} className="text-star-dim hover:text-star text-xl px-2">›</button>
-      </div>
+          {/* 月曆視圖：月份導覽 + 格子。之前這段沒被 view 條件包住，
+              導致「列表」按鈕點了跟「月曆」畫面一模一樣——現在分開 */}
+          {view === "month" && (
+            <>
+              <div className="flex items-center justify-between mx-3 mt-4 px-2">
+                <button onClick={prevMonth} className="text-star-dim hover:text-star text-xl px-2">‹</button>
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-display font-bold text-star">{year}年 {monthNames[month]}</h2>
+                  <button onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); }}
+                    className="text-xs px-2 py-1 rounded-full border border-white/10 text-star-dim hover:text-star">今天</button>
+                </div>
+                <button onClick={nextMonth} className="text-star-dim hover:text-star text-xl px-2">›</button>
+              </div>
 
-      {/* Calendar grid */}
-      <div className="mx-2 mt-3">
-        <div className="grid grid-cols-7 text-center mb-1">
-          {weekDays.map((d, i) => (
-            <div key={i} className={`text-xs py-1 ${i === 0 || i === 6 ? "text-star-dim/50" : "text-star-dim/70"}`}>{d}</div>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
-          {days.map((date, i) => {
-            if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
-            const ds = date.toISOString().slice(0, 10);
-            const isToday = ds === todayStr;
-            const dayEvents = allEvents[ds] || [];
-            return (
-              <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
-                <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
-                <div className="flex flex-wrap gap-0.5 mt-0.5">
-                  {dayEvents.slice(0, 3).map((ev) => (
-                    <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
+              <div className="mx-2 mt-3">
+                <div className="grid grid-cols-7 text-center mb-1">
+                  {weekDays.map((d, i) => (
+                    <div key={i} className={`text-xs py-1 ${i === 0 || i === 6 ? "text-star-dim/50" : "text-star-dim/70"}`}>{d}</div>
                   ))}
                 </div>
+                <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
+                  {days.map((date, i) => {
+                    if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
+                    const ds = date.toISOString().slice(0, 10);
+                    const isToday = ds === todayStr;
+                    const dayEvents = allEvents[ds] || [];
+                    return (
+                      <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
+                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                        <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
+                        <div className="flex flex-wrap gap-0.5 mt-0.5">
+                          {dayEvents.slice(0, 3).map((ev) => (
+                            <span key={ev.id} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            </>
+          )}
 
-      {/* Event list */}
-      <div className="mx-3 mt-6 space-y-2">
-        {Object.entries(allEvents).sort(([a],[b]) => a.localeCompare(b)).map(([date, evs]) => (
-          <div key={date} className="glass p-3">
-            <div className="text-xs text-star-dim mb-2">{date} ({new Date(date).toLocaleDateString("zh-TW", { weekday: "short" })})</div>
-            {evs.map((ev) => (
-              <div key={ev.id} className="flex items-center gap-2 py-1.5 border-t border-white/5 group">
-                <span className={`w-2 h-2 rounded-full ${C[ev.type]?.dot}`} />
-                <span className="text-star text-sm flex-1">{ev.title}</span>
-                {ev.repeat && <span className="text-[9px] text-star-dim/50 mr-1">↻{ev.repeat === "weekly" ? "週" : "月"}</span>}
-                {/* Emoji reactions */}
-                {ev.emoji && <span className="text-xs">{ev.emoji}</span>}
-                <div className="hidden group-hover:flex items-center gap-0.5">
-                  {REACTIONS.map((e) => (
-                    <button key={e} onClick={() => reactEvent(ev.id, e)} className="text-xs hover:scale-125 transition-transform">{e}</button>
+          {/* 列表視圖：依日期分組的扁平清單，不含月曆格子 */}
+          {view === "list" && (
+            <div className="mx-3 mt-4 space-y-2">
+              {Object.entries(allEvents).sort(([a],[b]) => a.localeCompare(b)).map(([date, evs]) => (
+                <div key={date} className="glass p-3">
+                  <div className="text-xs text-star-dim mb-2">{date} ({new Date(date).toLocaleDateString("zh-TW", { weekday: "short" })})</div>
+                  {evs.map((ev) => (
+                    <div key={ev.id} className="flex items-center gap-2 py-1.5 border-t border-white/5 group">
+                      <span className={`w-2 h-2 rounded-full ${C[ev.type]?.dot}`} />
+                      <span className="text-star text-sm flex-1">{ev.title}</span>
+                      {ev.repeat && <span className="text-[9px] text-star-dim/50 mr-1">↻{ev.repeat === "weekly" ? "週" : "月"}</span>}
+                      {ev.emoji && <span className="text-xs">{ev.emoji}</span>}
+                      <div className="hidden group-hover:flex items-center gap-0.5">
+                        {REACTIONS.map((e) => (
+                          <button key={e} onClick={() => reactEvent(ev.id, e)} className="text-xs hover:scale-125 transition-transform">{e}</button>
+                        ))}
+                      </div>
+                      <span className={`text-[10px] ${C[ev.type]?.text}`}>{LABEL[ev.type]}</span>
+                      <button onClick={() => removeEvent(ev.id)} className="text-star-dim hover:text-red-400 text-xs ml-1">×</button>
+                    </div>
                   ))}
                 </div>
-                <span className={`text-[10px] ${C[ev.type]?.text}`}>{LABEL[ev.type]}</span>
-                <button onClick={() => removeEvent(ev.id)} className="text-star-dim hover:text-red-400 text-xs ml-1">×</button>
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
+              ))}
+              {Object.keys(allEvents).length === 0 && (
+                <p className="text-star-dim text-center py-12 text-sm">尚無事件，點月曆中的日期來新增</p>
+              )}
+            </div>
+          )}
 
       {/* Add event modal */}
       {showAdd && selectedDate && (

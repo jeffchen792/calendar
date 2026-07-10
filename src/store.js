@@ -131,7 +131,7 @@ export async function createPair(name, pairedAt) {
   if (!uid) return null;
 
   const code = crypto.randomUUID().slice(0, 8);
-  const { data: pair, error: e1 } = await supabase.from("pairs").insert({ code }).select().single();
+  const { data: pair, error: e1 } = await supabase.from("pairs").insert({ code, paired_at: pairedAt }).select().single();
   if (e1) { console.error(e1); return null; }
 
   const { error: e2 } = await supabase.from("users").insert({ id: uid.id, name, pair_id: pair.id }).select().single();
@@ -160,6 +160,34 @@ export async function joinPair(name, code) {
   fetchEvents(pair.id);
   useAuth.getState().setUser({ id: uid.id, name, pairCode: code, pairId: pair.id });
   return { success: true };
+}
+
+// 從 Supabase 讀「配對層級」的 paired_at，同步覆蓋回本地 user 物件——
+// 兩人都要看到同一個日期，不能各自存在自己的 localStorage 裡各說各話。
+export async function fetchPairInfo(pairId) {
+  if (!supabase || !pairId) return;
+  const { data } = await supabase.from("pairs").select("paired_at").eq("id", pairId).single();
+  if (data?.paired_at) {
+    const u = useAuth.getState().user;
+    if (u && u.pairedAt !== data.paired_at) {
+      const nu = { ...u, pairedAt: data.paired_at };
+      local("cosmic_user", nu);
+      useAuth.getState().setUser(nu);
+    }
+  }
+}
+
+export async function updatePairedAt(pairId, date) {
+  if (supabase && pairId) {
+    const { error } = await supabase.from("pairs").update({ paired_at: date }).eq("id", pairId);
+    if (error) console.error("updatePairedAt failed:", error);
+  }
+  const u = useAuth.getState().user;
+  if (u) {
+    const nu = { ...u, pairedAt: date };
+    local("cosmic_user", nu);
+    useAuth.getState().setUser(nu);
+  }
 }
 
 function fallbackCreatePair(name, pairedAt) {
