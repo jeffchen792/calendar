@@ -124,8 +124,8 @@ export const useNotes = create((set) => ({
 
 // ── Pairing (with Anonymous Auth + proper RLS) ──
 
-export async function createPair(name) {
-  if (!supabase) return fallbackCreatePair(name);
+export async function createPair(name, pairedAt) {
+  if (!supabase) return fallbackCreatePair(name, pairedAt);
 
   const uid = await ensureAuth();
   if (!uid) return null;
@@ -140,7 +140,7 @@ export async function createPair(name) {
   // Re-fetch with session to get fresh RLS context
   subAll(pair.id);
   fetchEvents(pair.id);
-  useAuth.getState().setUser({ id: uid.id, name, pairCode: code, pairId: pair.id });
+  useAuth.getState().setUser({ id: uid.id, name, pairCode: code, pairId: pair.id, pairedAt });
   return code;
 }
 
@@ -162,9 +162,9 @@ export async function joinPair(name, code) {
   return { success: true };
 }
 
-function fallbackCreatePair(name) {
+function fallbackCreatePair(name, pairedAt) {
   const pairCode = crypto.randomUUID().slice(0, 8);
-  const user = { id: crypto.randomUUID(), name, pairCode, pairId: null };
+  const user = { id: crypto.randomUUID(), name, pairCode, pairId: null, pairedAt };
   local("cosmic_user", user);
   useAuth.getState().setUser(user);
   return pairCode;

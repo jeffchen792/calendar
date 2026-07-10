@@ -5,6 +5,7 @@ export default function Home() {
   const { setUser } = useAuth();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [pairedAt, setPairedAt] = useState(new Date().toISOString().slice(0, 10));
   const [step, setStep] = useState("start");
   const [inviteCode, setInviteCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -13,7 +14,7 @@ export default function Home() {
   const handleCreate = async () => {
     if (!name.trim()) return;
     setLoading(true);
-    const pairCode = await createPair(name.trim());
+    const pairCode = await createPair(name.trim(), pairedAt);
     if (pairCode) {
       setInviteCode(pairCode);
       setStep("showCode");
@@ -67,8 +68,12 @@ export default function Home() {
         {step === "create" && (
           <div className="space-y-4">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="你的名字" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none" autoFocus />
+            <div className="space-y-1">
+              <p className="text-[10px] text-star-dim tracking-widest uppercase text-center">在一起的第一天</p>
+              <input type="date" value={pairedAt} onChange={(e) => setPairedAt(e.target.value)} className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none text-center" />
+            </div>
             <button onClick={handleCreate} className="btn-primary w-full text-white">{loading ? "建立中..." : "建立連線"}</button>
-            <button onClick={() => setStep("start")} className="text-star-dim hover:text-star text-sm">← 返回</button>
+            <button onClick={() => setStep("start")} className="w-full py-2 text-star-dim text-sm">← 返回</button>
           </div>
         )}
 
