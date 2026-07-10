@@ -49,6 +49,7 @@ export default function CosmosView({ events, user, partner, pairedAt, onBack }) 
     if (!mergeToday || mergePlayed) return;
     const key = `merge_played_${new Date().toISOString().slice(0, 10)}`;
     if (localStorage.getItem(key)) { setMergePlayed(true); cosmosState.mergeProgress = 1; return; }
+    // Play merge animation once per day — write to cosmosState only, no React setState in rAF
     const start = performance.now();
     const step = () => {
       const p = Math.min(1, (performance.now() - start) / 3000);
