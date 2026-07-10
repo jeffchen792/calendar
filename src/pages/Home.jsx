@@ -82,7 +82,7 @@ export default function Home() {
               </button>
             </div>
             <p className="text-xs text-star-dim">把這組碼傳給對方，他在「加入星系」輸入即可配對</p>
-            <button onClick={() => setUser(JSON.parse(localStorage.getItem("cosmic_user")))} className="btn-primary w-full text-white">
+            <button onClick={() => setUser(useAuth.getState().user)} className="btn-primary w-full text-white">
               進入日曆 →
             </button>
           </div>
@@ -92,6 +92,7 @@ export default function Home() {
           <div className="space-y-4">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="你的名字" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none" />
             <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="對方給你的 8 碼邀請碼" className="w-full px-4 py-3 glass text-star placeholder-star-dim/50 outline-none text-center font-mono tracking-widest" maxLength={8} />
+            {error && <p className="text-red-400 text-sm text-center">{error}</p>}
             <button onClick={handleJoin} className="btn-primary w-full text-white">{loading ? "加入中..." : "加入星系"}</button>
             <button onClick={() => setStep("start")} className="text-star-dim hover:text-star text-sm">← 返回</button>
           </div>
