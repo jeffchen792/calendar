@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useAuth, useEvents } from "../store";
+import FloatingPhotos from "../components/FloatingPhotos";
 
 const COLORS = { you: { border: "border-you", text: "text-you", bg: "bg-you/15", dot: "bg-you" },
   me: { border: "border-me", text: "text-me", bg: "bg-me/15", dot: "bg-me" },
@@ -60,7 +61,8 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-cosmic-bg pb-24">
+    <div className="min-h-screen bg-cosmic-bg pb-24 relative">
+      <FloatingPhotos />
       {/* Header */}
       <header className="glass mx-3 mt-3 p-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
