@@ -3,12 +3,9 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { cosmosState } from "./cosmosState";
 
-const ORBIT_R = 3.2;
-const OMEGA = 0.15;
 const FLIGHT_DURATION = 2;
 const MAX_SPARKS = 5;
 
-// Cubic bezier midpoint for control point
 function bezierPoint(t, p0, p1, p2, p3) {
   const u = 1 - t;
   return new THREE.Vector3(
@@ -18,69 +15,46 @@ function bezierPoint(t, p0, p1, p2, p3) {
   );
 }
 
-export default function NoteSparks({ onStarClick }) {
+export default function NoteSparks() {
   const sparksRef = useRef([]);
-  const activeSparks = useRef([]); // { id, t, fromMe, start, end, ctrlStart, ctrlEnd }
-
+  const activeSparks = useRef([]);
   const sparkGeo = useMemo(() => new THREE.SphereGeometry(0.1, 8, 8), []);
-  const starA = useMemo(() => new THREE.Vector3(), []);
-  const starB = useMemo(() => new THREE.Vector3(), []);
-  const ctrl = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((state, delta) => {
-    const t = state.clock.elapsedTime;
+    // Drain sparkQueue — use shared positions from cosmosState
+    const fromPos = cosmosState.starA;
+    const toPos = cosmosState.starB;
 
-    // Current star positions
-    starA.set(Math.cos(t * OMEGA) * ORBIT_R, 0, Math.sin(t * OMEGA) * ORBIT_R);
-    starB.set(Math.cos(t * OMEGA + Math.PI) * ORBIT_R, 0, Math.sin(t * OMEGA + Math.PI) * ORBIT_R);
-
-    // Drain sparkQueue
     while (cosmosState.sparkQueue.length > 0 && activeSparks.current.length < MAX_SPARKS) {
       const q = cosmosState.sparkQueue.shift();
-      const from = q.fromMe ? starA.clone() : starB.clone();
-      const to = q.fromMe ? starB.clone() : starA.clone();
-      const mid = from.clone().add(to).multiplyScalar(0.5);
+      const start = q.fromMe ? fromPos.clone() : toPos.clone();
+      const end = q.fromMe ? toPos.clone() : fromPos.clone();
+      const mid = start.clone().add(end).multiplyScalar(0.5);
       mid.y += 2.5;
-      activeSparks.current.push({
-        id: q.id,
-        t: 0,
-        fromMe: q.fromMe,
-        start: from.clone(),
-        end: to.clone(),
-        ctrl1: from.clone().add(mid).multiplyScalar(0.5),
-        ctrl2: to.clone().add(mid).multiplyScalar(0.5),
-      });
+      activeSparks.current.push({ id: q.id, t: 0, fromMe: q.fromMe });
     }
 
-    // Animate active sparks
+    // Animate
     for (let i = activeSparks.current.length - 1; i >= 0; i--) {
       const s = activeSparks.current[i];
       s.t += delta / FLIGHT_DURATION;
-      if (s.t >= 1) {
-        activeSparks.current.splice(i, 1);
-        continue;
-      }
-      // Update bezier with current positions
-      const from = s.fromMe ? starA : starB;
-      const to = s.fromMe ? starB : starA;
-      const mid = from.clone().add(to).multiplyScalar(0.5);
-      mid.y += 2.5;
-      s.ctrl1 = from.clone().add(mid).multiplyScalar(0.5);
-      s.ctrl2 = to.clone().add(mid).multiplyScalar(0.5);
+      if (s.t >= 1) { activeSparks.current.splice(i, 1); continue; }
     }
 
-    // Update mesh positions
+    // Update meshes
     sparksRef.current.forEach((mesh, i) => {
-      if (!mesh || i >= activeSparks.current.length) return;
+      if (!mesh || i >= activeSparks.current.length) { mesh && (mesh.visible = false); return; }
       const s = activeSparks.current[i];
-      const pt = bezierPoint(s.t, s.fromMe ? starA : starB, s.ctrl1, s.ctrl2, s.fromMe ? starB : starA);
+      const start = s.fromMe ? fromPos : toPos;
+      const end = s.fromMe ? toPos : fromPos;
+      const mid = start.clone().add(end).multiplyScalar(0.5);
+      mid.y += 2.5;
+      const pt = bezierPoint(s.t, start,
+        start.clone().add(mid).multiplyScalar(0.5),
+        end.clone().add(mid).multiplyScalar(0.5), end);
       mesh.position.copy(pt);
       mesh.visible = true;
     });
-    // Hide unused meshes
-    for (let i = activeSparks.current.length; i < MAX_SPARKS; i++) {
-      if (sparksRef.current[i]) sparksRef.current[i].visible = false;
-    }
   });
 
   return (
