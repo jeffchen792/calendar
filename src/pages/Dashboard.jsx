@@ -77,7 +77,9 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-cosmic-bg pb-24 relative">
+    /* 根元素不可加不透明背景（bg-cosmic-bg 已由 body 提供）——
+       否則 -z-10 的 FloatingPhotos 會被畫到背景後面而完全看不見 */
+    <div className="min-h-screen pb-24 relative">
       <FloatingPhotos />
 
       {/* Miss-you ping animation */}
@@ -166,7 +168,7 @@ export default function Dashboard() {
             const dayEvents = allEvents[ds] || [];
             return (
               <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                className={`aspect-square bg-cosmic-deep/80 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative ${isToday ? "ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
                 <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
                 <div className="flex flex-wrap gap-0.5 mt-0.5">
                   {dayEvents.slice(0, 3).map((ev) => (
