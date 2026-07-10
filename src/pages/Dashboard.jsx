@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAuth, useEvents, useMood, useMissYou, getRecurringDates } from "../store";
 import FloatingPhotos from "../components/FloatingPhotos";
+import CosmosView from "../components/cosmos/CosmosView";
 
 const C = {
   you: { border: "border-you", text: "text-you", bg: "bg-you/15", dot: "bg-you" },
@@ -167,7 +168,22 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Month navigator */}
+      {/* View toggle + CosmosView */}
+      {view === "cosmos" ? (
+        <CosmosView events={events} user={user} partner={partner} pairedAt={user?.pairedAt} onBack={() => setView("month")} />
+      ) : (
+        <>
+          {/* View toggle */}
+          <div className="flex mx-3 mt-2 bg-white/5 rounded-lg p-0.5">
+            {["month", "list", "cosmos"].map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`flex-1 py-1.5 text-xs rounded-md transition-all ${view === v ? "bg-white/10 text-star" : "text-star-dim"}`}>
+                {v === "month" ? "月曆" : v === "list" ? "列表" : "星空"}
+              </button>
+            ))}
+          </div>
+
+          {/* Month navigator */}
       <div className="flex items-center justify-between mx-3 mt-4 px-2">
         <button onClick={prevMonth} className="text-star-dim hover:text-star text-xl px-2">‹</button>
         <div className="flex items-center gap-3">
@@ -271,6 +287,8 @@ export default function Dashboard() {
           <span className="text-xs text-star-dim">{Object.values(allEvents).flat().length} 個事件</span>
         </div>
       </div>
+        </>
+      )}
 
       <style>{`
         @keyframes pingFly { 0% { opacity:1; transform: translateY(0) scale(0.5); } 50% { opacity:0.8; transform: translateY(-60px) scale(1.2); } 100% { opacity:0; transform: translateY(-120px) scale(0.3); } }
