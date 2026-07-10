@@ -1,32 +1,41 @@
 # Cosmic ✦ 雙星日曆
 
-情侶的 3D 星系日曆 — 你們的時間是一個共同的世界。
+情侶的共享星系日曆 — 你們的時間是一個共同的世界。
+
+## 架構
+```
+你 ←→ Vercel (前端) ←→ Supabase (資料庫 + Realtime)
+女友 ←→ Vercel (前端) ←→ Supabase (資料庫 + Realtime)
+```
+- **Vercel**：託管 React 前端，`calendar-iota-pearl.vercel.app`
+- **Supabase**：Postgres 資料庫 + 即時同步，不用自己寫後端
 
 ## 技術棧
-- Vite + React 19
-- Tailwind CSS v3
-- Zustand (狀態管理)
-- React Three Fiber (3D — Phase 2)
+Vite + React 19 / Tailwind CSS v3 / Zustand / Supabase (Realtime)
 
-## Phase 1 (當前)
-- [x] 專案骨架
+## 功能
 - [x] 雙人配對（邀請碼）
-- [x] 事件 CRUD（你/他/我們）
-- [ ] Supabase 即時同步
-- [ ] 2D 月曆檢視
+- [x] TimeTree 風格月曆 + 列表
+- [x] 事件 CRUD（你/他/我們、週期性）
+- [x] 表情回應
+- [x] 心情天氣
+- [x] 想你按鈕（光點 ping）
+- [x] 去年的今天
+- [x] 照片漂浮背景 + 視差
+- [x] Supabase 即時同步
 
-## Phase 2
+## Phase 2（之後）
 - [ ] 雙星軌道 3D 場景
-- [ ] 事件行星（軌道位置對應日期）
-- [ ] Scroll-driven 相機時間軸
-
-## Phase 3
-- [ ] 每日小紙條（光點留言）
-- [ ] 心情天氣（星球顏色變化）
+- [ ] 每日小紙條
 - [ ] 紀念日合體動畫
 
-## 啟動
+## 環境變數
+```env
+VITE_SUPABASE_URL=https://xxx.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJh...
+```
+
+## 部署
 ```bash
-npm install
-npm run dev
+git push  # → Vercel 自動部署
 ```
