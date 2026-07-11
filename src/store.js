@@ -59,14 +59,7 @@ export function getPeriodInfo(logs, periodLength = 5) {
     next = addDays(next, avgCycle);
   }
 
-  // 排卵日約落在下次經期前 14 天，易孕期抓排卵日前 4 天到後 1 天——粗估值，不作避孕依據
-  const fertileDays = {};
-  predictedStarts.slice(0, 2).forEach((s) => {
-    const ovulation = addDays(s, -14);
-    for (let i = -4; i <= 1; i++) fertileDays[addDays(ovulation, i)] = true;
-  });
-
-  return { avgCycle, periodLength, lastStart, nextStart: predictedStarts[0], starts, recordedDays, predictedDays, fertileDays };
+  return { avgCycle, periodLength, lastStart, nextStart: predictedStarts[0], starts, recordedDays, predictedDays };
 }
 
 // ── Anonymous Auth（僅剩無 Supabase 的本地 fallback 在用）──

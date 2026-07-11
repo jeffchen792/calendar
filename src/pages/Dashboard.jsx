@@ -129,7 +129,6 @@ export default function Dashboard() {
     if (toNext >= 0 && toNext <= 5) {
       return { text: toNext === 0 ? "預計今天生理期會來" : `預計 ${toNext} 天後生理期來`, tone: "soon" };
     }
-    if (periodInfo.fertileDays[todayStr]) return { text: "易孕期（預測，僅供參考）", tone: "fertile" };
     return null;
   }, [periodInfo, todayStr]);
 
@@ -256,10 +255,10 @@ export default function Dashboard() {
 
       {/* Period tracker banner */}
       {periodBanner && (
-        <div className={`glass mx-3 mt-2 px-4 py-2.5 flex items-center gap-2.5 border-l-2 ${periodBanner.tone === "active" ? "border-rose-400/60" : periodBanner.tone === "fertile" ? "border-teal-400/50" : "border-rose-400/30"}`}>
-          <span className="text-base">{periodBanner.tone === "fertile" ? "🌱" : "🩸"}</span>
+        <div className={`glass mx-3 mt-2 px-4 py-2.5 flex items-center gap-2.5 border-l-2 ${periodBanner.tone === "active" ? "border-rose-400/60" : "border-rose-400/30"}`}>
+          <span className="text-base">🩸</span>
           <p className="text-sm text-star flex-1">{periodBanner.text}</p>
-          {periodBanner.tone !== "fertile" && <p className="text-[9px] text-star-dim">推算僅供參考</p>}
+          <p className="text-[9px] text-star-dim">推算僅供參考</p>
         </div>
       )}
 
@@ -331,7 +330,6 @@ export default function Dashboard() {
                     const dayEvents = allEvents[ds] || [];
                     const isPeriod = periodInfo?.recordedDays[ds];
                     const isPeriodPredicted = !isPeriod && periodInfo?.predictedDays[ds];
-                    const isFertile = periodInfo?.fertileDays[ds];
                     return (
                       <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
                         className={`min-h-14 sm:min-h-[4.2rem] bg-cosmic-deep/55 p-0.5 sm:p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""} ${isPeriod ? "bg-rose-500/10" : ""}`}>
@@ -339,7 +337,6 @@ export default function Dashboard() {
                           <span className={`text-[10px] sm:text-xs px-0.5 ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
                           {isPeriod && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title="生理期" />}
                           {isPeriodPredicted && <span className="w-1.5 h-1.5 rounded-full border border-rose-400/60 shrink-0" title="預測生理期" />}
-                          {isFertile && <span className="w-1.5 h-1.5 rounded-full bg-teal-400/70 shrink-0" title="易孕期（預測）" />}
                         </div>
                         <div className="mt-0.5 space-y-0.5">
                           {dayEvents.slice(0, 2).map((ev, j) => (
@@ -512,14 +509,9 @@ export default function Dashboard() {
             </div>
           ))}
           {periodInfo && (
-            <>
-              <div className="flex items-center gap-1.5 text-xs text-star-dim">
-                <span className="w-2 h-2 rounded-full bg-rose-400" />生理
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-star-dim">
-                <span className="w-2 h-2 rounded-full bg-teal-400/70" />易孕(預測)
-              </div>
-            </>
+            <div className="flex items-center gap-1.5 text-xs text-star-dim">
+              <span className="w-2 h-2 rounded-full bg-rose-400" />生理
+            </div>
           )}
           <div className="flex-1" />
           <span className="text-xs text-star-dim">{Object.values(allEvents).flat().length} 個事件</span>
