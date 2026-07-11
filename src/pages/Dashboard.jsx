@@ -298,25 +298,19 @@ export default function Dashboard() {
                 </div>
                 <div className="grid grid-cols-7 gap-px bg-white/5 rounded-xl overflow-hidden">
                   {days.map((date, i) => {
-                    if (!date) return <div key={`e${i}`} className="aspect-square bg-transparent" />;
+                    if (!date) return <div key={`e${i}`} className="bg-transparent" />;
                     const ds = fmtDate(date);
                     const isToday = ds === todayStr;
                     const dayEvents = allEvents[ds] || [];
                     return (
                       <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                        className={`aspect-square bg-cosmic-deep/55 p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
-                        <span className={`text-xs ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
-                        {/* 手機上格子太小只放色點；sm 以上直接顯示事件標題 */}
-                        <div className="flex flex-wrap gap-0.5 mt-0.5 sm:hidden">
-                          {dayEvents.slice(0, 3).map((ev, j) => (
-                            <span key={`${ev.id}-${j}`} className={`w-1.5 h-1.5 rounded-full ${C[ev.type]?.dot || "bg-white/30"}`} />
-                          ))}
-                        </div>
-                        <div className="hidden sm:block mt-0.5 space-y-0.5">
+                        className={`min-h-14 sm:min-h-[4.2rem] bg-cosmic-deep/55 p-0.5 sm:p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
+                        <span className={`text-[10px] sm:text-xs px-0.5 ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
+                        <div className="mt-0.5 space-y-0.5">
                           {dayEvents.slice(0, 2).map((ev, j) => (
-                            <div key={`${ev.id}-${j}`} className={`text-[9px] leading-tight truncate rounded px-1 ${C[ev.type]?.bg} ${C[ev.type]?.text}`}>{ev.title}</div>
+                            <div key={`${ev.id}-${j}`} className={`text-[8px] sm:text-[9px] leading-tight truncate rounded px-0.5 sm:px-1 py-px ${C[ev.type]?.bg} ${C[ev.type]?.text}`}>{ev.title}</div>
                           ))}
-                          {dayEvents.length > 2 && <div className="text-[8px] text-star-dim/60 px-1">+{dayEvents.length - 2}</div>}
+                          {dayEvents.length > 2 && <div className="text-[8px] text-star-dim/60 px-0.5">+{dayEvents.length - 2}</div>}
                         </div>
                       </div>
                     );
