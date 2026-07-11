@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { useAuth, useEvents, useMood, useMissYou, useLists, getRecurringDates, fetchPairInfo, updatePairedAt, fmtDate } from "../store";
+import { useAuth, useEvents, useMood, useMissYou, useLists, usePeriod, getRecurringDates, getPeriodInfo, fetchPairInfo, updatePairedAt, fmtDate } from "../store";
 import FloatingPhotos from "../components/FloatingPhotos";
 import CosmosView from "../components/cosmos/CosmosView";
 
@@ -36,6 +36,7 @@ export default function Dashboard() {
   const { myMood, setMyMood, partnerMood } = useMood();
   const { pings, sendPing, clearPings } = useMissYou();
   const { items, addItem, toggleItem, removeItem } = useLists();
+  const { logs: periodLogs, toggleLog: togglePeriod } = usePeriod();
   const [bucketCat, setBucketCat] = useState("eat");
   const [bucketText, setBucketText] = useState("");
   const [bucketError, setBucketError] = useState("");
@@ -114,6 +115,23 @@ export default function Dashboard() {
     const days = Math.round((new Date(best.date + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000);
     return { ...best, days };
   }, [allEvents, user?.pairedAt, todayStr]);
+
+  // 經期預測（僅供參考，根據過去紀錄的平均週期推算）
+  const periodInfo = useMemo(() => getPeriodInfo(periodLogs), [periodLogs]);
+
+  const periodBanner = useMemo(() => {
+    if (!periodInfo) return null;
+    if (periodInfo.recordedDays[todayStr]) {
+      const dayNum = Math.round((new Date(todayStr + "T00:00:00") - new Date(periodInfo.lastStart + "T00:00:00")) / 86400000) + 1;
+      return { text: `生理期中・第 ${dayNum} 天`, tone: "active" };
+    }
+    const toNext = Math.round((new Date(periodInfo.nextStart + "T00:00:00") - new Date(todayStr + "T00:00:00")) / 86400000);
+    if (toNext >= 0 && toNext <= 5) {
+      return { text: toNext === 0 ? "預計今天生理期會來" : `預計 ${toNext} 天後生理期來`, tone: "soon" };
+    }
+    if (periodInfo.fertileDays[todayStr]) return { text: "易孕期（預測，僅供參考）", tone: "fertile" };
+    return null;
+  }, [periodInfo, todayStr]);
 
   // "This day last year"
   const oneYearAgo = useMemo(() => {
@@ -236,6 +254,15 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Period tracker banner */}
+      {periodBanner && (
+        <div className={`glass mx-3 mt-2 px-4 py-2.5 flex items-center gap-2.5 border-l-2 ${periodBanner.tone === "active" ? "border-rose-400/60" : periodBanner.tone === "fertile" ? "border-teal-400/50" : "border-rose-400/30"}`}>
+          <span className="text-base">{periodBanner.tone === "fertile" ? "🌱" : "🩸"}</span>
+          <p className="text-sm text-star flex-1">{periodBanner.text}</p>
+          {periodBanner.tone !== "fertile" && <p className="text-[9px] text-star-dim">推算僅供參考</p>}
+        </div>
+      )}
+
       {/* "This day last year" banner */}
       {oneYearAgo.events.length > 0 && (
         <div className="glass mx-3 mt-3 p-3 border-l-2 border-gold/50">
@@ -302,10 +329,18 @@ export default function Dashboard() {
                     const ds = fmtDate(date);
                     const isToday = ds === todayStr;
                     const dayEvents = allEvents[ds] || [];
+                    const isPeriod = periodInfo?.recordedDays[ds];
+                    const isPeriodPredicted = !isPeriod && periodInfo?.predictedDays[ds];
+                    const isFertile = periodInfo?.fertileDays[ds];
                     return (
                       <div key={ds} onClick={() => { setSelectedDate(ds); setShowAdd(true); }}
-                        className={`min-h-14 sm:min-h-[4.2rem] bg-cosmic-deep/55 p-0.5 sm:p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""}`}>
-                        <span className={`text-[10px] sm:text-xs px-0.5 ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
+                        className={`min-h-14 sm:min-h-[4.2rem] bg-cosmic-deep/55 p-0.5 sm:p-1 cursor-pointer hover:bg-white/5 transition-colors relative overflow-hidden ${isToday ? "today-breathe ring-1 ring-glow-purple/50 ring-inset" : ""} ${isPeriod ? "bg-rose-500/10" : ""}`}>
+                        <div className="flex items-center gap-0.5">
+                          <span className={`text-[10px] sm:text-xs px-0.5 ${isToday ? "text-glow-purple font-bold" : "text-star-dim/60"}`}>{date.getDate()}</span>
+                          {isPeriod && <span className="w-1.5 h-1.5 rounded-full bg-rose-400 shrink-0" title="生理期" />}
+                          {isPeriodPredicted && <span className="w-1.5 h-1.5 rounded-full border border-rose-400/60 shrink-0" title="預測生理期" />}
+                          {isFertile && <span className="w-1.5 h-1.5 rounded-full bg-teal-400/70 shrink-0" title="易孕期（預測）" />}
+                        </div>
                         <div className="mt-0.5 space-y-0.5">
                           {dayEvents.slice(0, 2).map((ev, j) => (
                             <div key={`${ev.id}-${j}`} className={`text-[8px] sm:text-[9px] leading-tight truncate rounded px-0.5 sm:px-1 py-px ${C[ev.type]?.bg} ${C[ev.type]?.text}`}>{ev.title}</div>
@@ -431,6 +466,12 @@ export default function Dashboard() {
               </div>
             )}
 
+            {/* 經期標記：直接點選日期即可標記/取消，不用另開頁面 */}
+            <button onClick={() => togglePeriod(selectedDate, user?.pairId, user?.id)}
+              className={`w-full py-2 rounded-lg text-sm border transition-colors ${(periodInfo?.starts || []).includes(selectedDate) ? "border-rose-400 bg-rose-500/15 text-rose-300" : "border-white/10 text-star-dim"}`}>
+              🩸 {(periodInfo?.starts || []).includes(selectedDate) ? "已標記為生理期第一天（點擊取消）" : "標記為生理期第一天"}
+            </button>
+
             <div className="flex gap-2">
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })}
                 placeholder="新增事件…" className="flex-1 px-3 py-2.5 bg-white/5 rounded-lg text-star placeholder-star-dim/50 outline-none focus:ring-1 focus:ring-glow-purple/40" autoFocus />
@@ -464,12 +505,22 @@ export default function Dashboard() {
 
       {/* Bottom legend */}
       <div className="fixed bottom-0 left-0 right-0 p-3 bg-cosmic-bg/90 backdrop-blur-xl border-t border-white/5">
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           {["you","me","us"].map((t) => (
             <div key={t} className="flex items-center gap-1.5 text-xs text-star-dim">
               <span className={`w-2 h-2 rounded-full ${C[t].dot}`} />{LABEL[t]}
             </div>
           ))}
+          {periodInfo && (
+            <>
+              <div className="flex items-center gap-1.5 text-xs text-star-dim">
+                <span className="w-2 h-2 rounded-full bg-rose-400" />生理
+              </div>
+              <div className="flex items-center gap-1.5 text-xs text-star-dim">
+                <span className="w-2 h-2 rounded-full bg-teal-400/70" />易孕(預測)
+              </div>
+            </>
+          )}
           <div className="flex-1" />
           <span className="text-xs text-star-dim">{Object.values(allEvents).flat().length} 個事件</span>
         </div>

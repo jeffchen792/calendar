@@ -24,6 +24,51 @@ export function getRecurringDates(event, months = 13) {
   return dates;
 }
 
+// ── 經期預測（純函式，僅供參考，非醫療用途）──
+// 只根據記錄的開始日期推算平均週期，兩筆以下就用醫學常見值 28 天當預設
+export function getPeriodInfo(logs, periodLength = 5) {
+  if (!logs.length) return null;
+  const starts = logs.map((l) => l.start_date).sort();
+  const lastStart = starts[starts.length - 1];
+
+  let avgCycle = 28;
+  if (starts.length >= 2) {
+    const diffs = [];
+    for (let i = 1; i < starts.length; i++) {
+      const d = Math.round((new Date(starts[i] + "T00:00:00") - new Date(starts[i - 1] + "T00:00:00")) / 86400000);
+      if (d >= 15 && d <= 60) diffs.push(d); // 濾掉漏記/補記造成的離群值
+    }
+    if (diffs.length) avgCycle = Math.round(diffs.reduce((a, b) => a + b, 0) / diffs.length);
+  }
+
+  const addDays = (dateStr, n) => {
+    const d = new Date(dateStr + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return fmtDate(d);
+  };
+
+  const recordedDays = {};
+  starts.forEach((s) => { for (let i = 0; i < periodLength; i++) recordedDays[addDays(s, i)] = true; });
+
+  const predictedDays = {};
+  const predictedStarts = [];
+  let next = addDays(lastStart, avgCycle);
+  for (let c = 0; c < 3; c++) {
+    predictedStarts.push(next);
+    for (let i = 0; i < periodLength; i++) predictedDays[addDays(next, i)] = true;
+    next = addDays(next, avgCycle);
+  }
+
+  // 排卵日約落在下次經期前 14 天，易孕期抓排卵日前 4 天到後 1 天——粗估值，不作避孕依據
+  const fertileDays = {};
+  predictedStarts.slice(0, 2).forEach((s) => {
+    const ovulation = addDays(s, -14);
+    for (let i = -4; i <= 1; i++) fertileDays[addDays(ovulation, i)] = true;
+  });
+
+  return { avgCycle, periodLength, lastStart, nextStart: predictedStarts[0], starts, recordedDays, predictedDays, fertileDays };
+}
+
 // ── Anonymous Auth（僅剩無 Supabase 的本地 fallback 在用）──
 async function ensureAuth() {
   if (!supabase) return null;
@@ -106,11 +151,13 @@ export async function subAll(pairId) {
   fetchEvents(pairId);
   fetchNotes(pairId);
   fetchLists(pairId);
+  fetchPeriods(pairId);
   channels = [
     supabase.channel("events").on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `pair_id=eq.${pairId}` }, () => fetchEvents(pairId)).subscribe(),
     supabase.channel("notes").on("postgres_changes", { event: "*", schema: "public", table: "notes", filter: `pair_id=eq.${pairId}` }, () => fetchNotes(pairId)).subscribe(),
     supabase.channel("pings").on("postgres_changes", { event: "INSERT", schema: "public", table: "pings", filter: `pair_id=eq.${pairId}` }, () => fetchPings(pairId)).subscribe(),
     supabase.channel("list_items").on("postgres_changes", { event: "*", schema: "public", table: "list_items", filter: `pair_id=eq.${pairId}` }, () => fetchLists(pairId)).subscribe(),
+    supabase.channel("period_logs").on("postgres_changes", { event: "*", schema: "public", table: "period_logs", filter: `pair_id=eq.${pairId}` }, () => fetchPeriods(pairId)).subscribe(),
   ];
 }
 
@@ -136,6 +183,12 @@ async function fetchLists(pairId) {
   const { data, error } = await supabase.from("list_items").select("*").eq("pair_id", pairId).order("created_at", { ascending: false });
   if (error) { console.error("fetchLists failed (還沒跑 supabase_v4_features.sql？):", error); return; }
   if (data) useLists.setState({ items: data });
+}
+async function fetchPeriods(pairId) {
+  if (!supabase) return;
+  const { data, error } = await supabase.from("period_logs").select("*").eq("pair_id", pairId).order("start_date", { ascending: true });
+  if (error) { console.error("fetchPeriods failed (還沒跑 supabase_v6_period.sql？):", error); return; }
+  if (data) usePeriod.setState({ logs: data });
 }
 
 // ── Auth Store ──
@@ -218,6 +271,28 @@ export const useLists = create((set) => ({
   removeItem: async (id) => {
     if (supabase) await supabase.from("list_items").delete().eq("id", id);
     set((s) => ({ items: s.items.filter((i) => i.id !== id) }));
+  },
+}));
+
+// ── Period Store（經期紀錄：只存「開始日」，週期預測由 getPeriodInfo 推算）──
+export const usePeriod = create((set, get) => ({
+  logs: [],
+  toggleLog: async (date, pairId, createdBy) => {
+    const existing = get().logs.find((l) => l.start_date === date);
+    if (existing) {
+      if (supabase) await supabase.from("period_logs").delete().eq("id", existing.id);
+      set((s) => ({ logs: s.logs.filter((l) => l.id !== existing.id) }));
+      return {};
+    }
+    if (supabase) {
+      const { data, error } = await supabase.from("period_logs")
+        .insert({ start_date: date, pair_id: pairId, created_by: createdBy }).select().single();
+      if (error) { console.error("logPeriod failed:", error); return { error: error.message }; }
+      if (data) set((s) => ({ logs: [...s.logs, data].sort((a, b) => a.start_date.localeCompare(b.start_date)) }));
+    } else {
+      set((s) => ({ logs: [...s.logs, { id: crypto.randomUUID(), start_date: date }].sort((a, b) => a.start_date.localeCompare(b.start_date)) }));
+    }
+    return {};
   },
 }));
 
